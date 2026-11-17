@@ -280,7 +280,116 @@
     contest.ini.qsb = qsbCheck.checked;
     contest.ini.flutter = flutterCheck.checked;
     contest.ini.lids = lidsCheck.checked;
+    contest.me.myCall = contest.ini.call;
+    contest.me.opName = contest.ini.hamName;
+    contest.me.spc = contest.ini.mySpc;
+    contest.me.cwtNr = contest.ini.myCwt;
     contest.updateBandConditions(prevFlags);
+    persistSettings();
+  }
+
+  let saveTimer = null;
+  let initialProfileLoaded = false;
+
+  function buildSettingsPayload() {
+    return {
+      call: myCallInput.value.trim().toUpperCase() || "N9FZ",
+      hamName: myNameInput.value.trim().toUpperCase() || "BOB",
+      mySpc: mySpcInput.value.trim().toUpperCase() || "IN",
+      myCwt: myCwtInput.value.trim().toUpperCase() || "2104",
+      wpm: Number(wpmInput.value) || 20,
+      pitch: Number(pitchSelect.value) || 600,
+      bandWidth: Number(bwSelect.value) || 500,
+      monVolumeDb: Number(monGainInput.value),
+      qsk: qskCheck.checked,
+      activity: Number(activityInput.value) || 3,
+      duration: Number(durationInput.value) || 30,
+      qrnModel: qrnModelSelect.value || "middleton",
+      qrn: qrnCheck.checked,
+      qrm: qrmCheck.checked,
+      qsb: qsbCheck.checked,
+      flutter: flutterCheck.checked,
+      lids: lidsCheck.checked,
+      mode: runModeSelect.value || "rmSst",
+    };
+  }
+
+  function persistSettings() {
+    const payload = buildSettingsPayload();
+    try {
+      localStorage.setItem("pymr_station_settings", JSON.stringify(payload));
+    } catch (_e) {}
+
+    if (!csrfToken) return;
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      fetch("/api/settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify(buildSettingsPayload()),
+      }).catch(() => {});
+    }, 350);
+  }
+
+  function applySavedSettings(s) {
+    if (!s || typeof s !== "object") return;
+    if (s.call) myCallInput.value = taintClean(s.call, /[^A-Z0-9/]/g, 15) || "N9FZ";
+    if (s.hamName) myNameInput.value = taintClean(s.hamName, /[^A-Z]/g, 12) || "BOB";
+    if (s.mySpc) mySpcInput.value = taintClean(s.mySpc, /[^A-Z0-9]/g, 6) || "IN";
+    if (s.myCwt) myCwtInput.value = taintClean(s.myCwt, /[^A-Z0-9]/g, 8) || "2104";
+    if (s.mode && MODE_TITLES[s.mode] && contest.ini.runMode === "rmStop") {
+      runModeSelect.value = s.mode;
+    }
+    if (Number.isFinite(Number(s.wpm))) {
+      const w = Math.max(5, Math.min(80, Number(s.wpm)));
+      wpmInput.value = String(w);
+      wpmQuickBadge.textContent = `${w} WPM`;
+    }
+    if (Number.isFinite(Number(s.pitch))) {
+      pitchSelect.value = String(s.pitch);
+    }
+    if (Number.isFinite(Number(s.bandWidth))) {
+      bwSelect.value = String(s.bandWidth);
+      bwStatusText.textContent = `${s.bandWidth} Hz`;
+    }
+    if (Number.isFinite(Number(s.monVolumeDb))) {
+      const m = Math.max(-30, Math.min(6, Number(s.monVolumeDb)));
+      monGainInput.value = String(m);
+      if (monGainValText) {
+        monGainValText.textContent = m <= -30 ? "Mute" : `${m > 0 ? "+" : ""}${m} dB`;
+      }
+    }
+    if (typeof s.qsk === "boolean") qskCheck.checked = s.qsk;
+    if (Number.isFinite(Number(s.activity))) activityInput.value = String(s.activity);
+    if (Number.isFinite(Number(s.duration))) durationInput.value = String(s.duration);
+    if (s.qrnModel === "middleton" || s.qrnModel === "ve3nea") qrnModelSelect.value = s.qrnModel;
+    if (typeof s.qrn === "boolean") qrnCheck.checked = s.qrn;
+    if (typeof s.qrm === "boolean") qrmCheck.checked = s.qrm;
+    if (typeof s.qsb === "boolean") qsbCheck.checked = s.qsb;
+    if (typeof s.flutter === "boolean") flutterCheck.checked = s.flutter;
+    if (typeof s.lids === "boolean") lidsCheck.checked = s.lids;
+
+    syncModeLabels();
+    contest.ini.call = myCallInput.value;
+    contest.ini.hamName = myNameInput.value;
+    contest.ini.mySpc = mySpcInput.value;
+    contest.ini.myCwt = myCwtInput.value;
+    contest.setWpm(Number(wpmInput.value) || 20);
+    contest.setPitch(Number(pitchSelect.value) || 600);
+    contest.setBandwidth(Number(bwSelect.value) || 500);
+    contest.ini.monVolumeDb = Number(monGainInput.value);
+    contest.ini.qsk = qskCheck.checked;
+    contest.ini.activity = Number(activityInput.value) || 3;
+    contest.ini.duration = Number(durationInput.value) || 30;
+    contest.ini.qrnModel = qrnModelSelect.value;
+    contest.ini.qrn = qrnCheck.checked;
+    contest.ini.qrm = qrmCheck.checked;
+    contest.ini.qsb = qsbCheck.checked;
+    contest.ini.flutter = flutterCheck.checked;
+    contest.ini.lids = lidsCheck.checked;
   }
 
   function startContest() {
@@ -566,15 +675,27 @@
 
   myCallInput.addEventListener("input", () => {
     myCallInput.value = taintClean(myCallInput.value, /[^A-Z0-9/]/g, 15);
+    contest.ini.call = myCallInput.value || "N9FZ";
+    contest.me.myCall = contest.ini.call;
+    persistSettings();
   });
   myNameInput.addEventListener("input", () => {
     myNameInput.value = taintClean(myNameInput.value, /[^A-Z]/g, 12);
+    contest.ini.hamName = myNameInput.value || "BOB";
+    contest.me.opName = contest.ini.hamName;
+    persistSettings();
   });
   mySpcInput.addEventListener("input", () => {
     mySpcInput.value = taintClean(mySpcInput.value, /[^A-Z0-9]/g, 6);
+    contest.ini.mySpc = mySpcInput.value || "IN";
+    contest.me.spc = contest.ini.mySpc;
+    persistSettings();
   });
   myCwtInput.addEventListener("input", () => {
     myCwtInput.value = taintClean(myCwtInput.value, /[^A-Z0-9]/g, 8);
+    contest.ini.myCwt = myCwtInput.value || "2104";
+    contest.me.cwtNr = contest.ini.myCwt;
+    persistSettings();
   });
 
   // ---------------------------------------------------------------------------
@@ -734,7 +855,10 @@
     else stopContest();
   });
 
-  runModeSelect.addEventListener("change", syncModeLabels);
+  runModeSelect.addEventListener("change", () => {
+    syncModeLabels();
+    persistSettings();
+  });
   wipeBtn.addEventListener("click", wipeBoxes);
 
   document.querySelectorAll(".fkey-btn").forEach((btn) => {
@@ -752,16 +876,19 @@
   wpmInput.addEventListener("change", () => {
     contest.setWpm(Number(wpmInput.value) || 20);
     wpmQuickBadge.textContent = `${contest.ini.wpm} WPM`;
+    persistSettings();
   });
 
   pitchSelect.addEventListener("change", () => {
     contest.setPitch(Number(pitchSelect.value) || 600);
+    persistSettings();
   });
 
   bwSelect.addEventListener("change", () => {
     const bw = Number(bwSelect.value) || 500;
     contest.setBandwidth(bw);
     bwStatusText.textContent = `${bw} Hz`;
+    persistSettings();
   });
 
   monGainInput.addEventListener("input", () => {
@@ -773,14 +900,20 @@
           ? "Mute"
           : `${contest.ini.monVolumeDb > 0 ? "+" : ""}${contest.ini.monVolumeDb} dB`;
     }
+    persistSettings();
   });
 
   qskCheck.addEventListener("change", () => {
     contest.ini.qsk = qskCheck.checked;
+    persistSettings();
   });
+
+  activityInput.addEventListener("change", syncSettingsFromInputs);
+  durationInput.addEventListener("change", syncSettingsFromInputs);
 
   qrnModelSelect.addEventListener("change", () => {
     contest.ini.qrnModel = qrnModelSelect.value;
+    persistSettings();
   });
 
   [qrnCheck, qrmCheck, qsbCheck, flutterCheck, lidsCheck].forEach((chk) => {
@@ -1172,10 +1305,29 @@
           adminPortalLink.hidden = data.user.role !== "admin";
         }
       }
+      if (!initialProfileLoaded && data.user) {
+        initialProfileLoaded = true;
+        if (data.user.settings && Object.keys(data.user.settings).length > 0) {
+          applySavedSettings(data.user.settings);
+          try {
+            localStorage.setItem("pymr_station_settings", JSON.stringify(data.user.settings));
+          } catch (_e) {}
+        } else {
+          persistSettings();
+        }
+      }
     } catch (_e) {
       // Ignore transient network hiccup
     }
   }
+
+  // Restore cached settings from localStorage immediately, then sync with Auth0 user profile
+  try {
+    const cached = localStorage.getItem("pymr_station_settings");
+    if (cached) {
+      applySavedSettings(JSON.parse(cached));
+    }
+  } catch (_e) {}
 
   // Initial setup
   verifySessionAndLoadUser();

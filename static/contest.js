@@ -496,8 +496,9 @@ const ContestEngine = (() => {
     }
 
     abortSend() {
+      const hadCq = this.msg.has("msgCQ") && this.sendPos > DEFAULTRATE * 0.25;
       this.envelope = null;
-      this.msg = new Set(["msgGarbage"]);
+      this.msg = new Set(hadCq ? ["msgCQ"] : ["msgGarbage"]);
       this.msgText = "";
       this.pieces = [];
       this.state = ST.Listening;
@@ -974,9 +975,23 @@ const ContestEngine = (() => {
 
         case EV.MeStarted:
           if (this.state !== ST.Sending) {
-            this.state = ST.Copying;
+            // In Full Break-In (QSK) mode, an impatient caller in OS.NeedQso may tail-end
+            // or call while the runner is still finishing CQ/TU so the operator hears them between dits/dahs
+            if (
+              this.contest.ini.qsk &&
+              this.oper.state === OS.NeedQso &&
+              (this.contest.me.msg.has("msgCQ") || this.contest.me.msg.has("msgTU")) &&
+              Math.random() < 0.3
+            ) {
+              this.state = ST.PreparingToSend;
+              this.timeOut = secondsToBlocks(0.35 + Math.random() * 0.9);
+            } else {
+              this.state = ST.Copying;
+              this.timeOut = NEVER;
+            }
+          } else {
+            this.timeOut = NEVER;
           }
-          this.timeOut = NEVER;
           break;
       }
     }
@@ -1264,6 +1279,23 @@ const ContestEngine = (() => {
     }
 
     onMeStartedSending() {
+      // In Full Break-In (QSK) mode, occasionally spawn a tail-ending caller during CQ/TU
+      // so the operator can hear stations breaking in between dits and dahs
+      const mode = this.ini.runMode;
+      if (
+        this.ini.qsk &&
+        mode !== "rmSingle" &&
+        mode !== "rmHst" &&
+        (this.me.msg.has("msgCQ") || this.me.msg.has("msgTU")) &&
+        Math.random() < 0.35
+      ) {
+        const earlyCaller = new DxStation(this);
+        earlyCaller.oper.setState(OS.NeedQso);
+        earlyCaller.state = ST.PreparingToSend;
+        earlyCaller.timeOut = secondsToBlocks(0.5 + Math.random() * 1.1);
+        this.stations.push(earlyCaller);
+      }
+
       for (let i = this.stations.length - 1; i >= 0; i--) {
         this.stations[i].processEvent(EV.MeStarted);
       }
@@ -1356,23 +1388,31 @@ const ContestEngine = (() => {
       while (this.ritPhase > TWO_PI) this.ritPhase -= TWO_PI;
       while (this.ritPhase < -TWO_PI) this.ritPhase += TWO_PI;
 
-      // 5. My transmitted sidetone & QSK break-in attenuation
+      // 5. My transmitted sidetone & Full Break-In (QSK) PIN-diode T/R switching
       let mySidetoneBlk = null;
       if (this.me.state === ST.Sending) {
         mySidetoneBlk = this.me.getBlock();
-        let rfg = 1.0;
+        if (typeof this.rfg !== "number") this.rfg = 1.0;
         for (let i = 0; i < bufSize; i++) {
           if (this.ini.qsk) {
-            const targetRfg = Math.max(0.0, 1.0 - mySidetoneBlk[i] / this.me.amplitude);
-            if (rfg > targetRfg) rfg = targetRfg;
-            else rfg = rfg * 0.992 + 0.008;
-            reIm.re[i] *= rfg;
-            reIm.im[i] *= rfg;
+            // Instant attack on key-down, ultra-fast ~1.2ms PIN-diode QSK recovery between every dit & dah
+            const keyEnv = Math.min(1.0, Math.max(0.0, mySidetoneBlk[i] / this.me.amplitude));
+            const targetRfg = 1.0 - keyEnv;
+            if (this.rfg > targetRfg) {
+              this.rfg = targetRfg;
+            } else {
+              this.rfg = this.rfg * 0.88 + 0.12 * targetRfg;
+            }
+            reIm.re[i] *= this.rfg;
+            reIm.im[i] *= this.rfg;
           } else {
+            this.rfg = 0.0;
             reIm.re[i] = 0.0;
             reIm.im[i] = 0.0;
           }
         }
+      } else {
+        this.rfg = 1.0;
       }
 
       // 6. Dual-buffer complex baseband IF filter

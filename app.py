@@ -442,6 +442,46 @@ def load_scores() -> list[dict[str, Any]]:
         return _load_scores_unlocked()
 
 
+def save_user_settings(user_sub: str, raw: dict[str, Any]) -> dict[str, Any]:
+    """Thread-safely sanitize and persist per-user station settings in users.json."""
+    allowed_modes = {"rmSst", "rmCwt", "rmPileup", "rmSingle", "rmWpx", "rmHst"}
+    mode_val = taint_check_ascii(raw.get("mode"), 16, "rmSst")
+    if mode_val not in allowed_modes:
+        mode_val = "rmSst"
+    qrn_model = taint_check_ascii(raw.get("qrnModel"), 16, "middleton")
+    if qrn_model not in ("middleton", "ve3nea"):
+        qrn_model = "middleton"
+
+    clean_settings: dict[str, Any] = {
+        "call": sanitize_call(raw.get("call"), "N9FZ"),
+        "hamName": sanitize_field(raw.get("hamName"), 12) or "BOB",
+        "mySpc": sanitize_field(raw.get("mySpc"), 6) or "IN",
+        "myCwt": sanitize_field(raw.get("myCwt"), 8) or "2104",
+        "wpm": safe_int(raw.get("wpm"), 20, 5, 80),
+        "pitch": safe_int(raw.get("pitch"), 600, 300, 900),
+        "bandWidth": safe_int(raw.get("bandWidth"), 500, 100, 600),
+        "monVolumeDb": safe_int(raw.get("monVolumeDb"), -6, -30, 6),
+        "qsk": bool(raw.get("qsk", True)),
+        "activity": safe_int(raw.get("activity"), 3, 1, 9),
+        "duration": safe_int(raw.get("duration"), 30, 1, 120),
+        "qrnModel": qrn_model,
+        "qrn": bool(raw.get("qrn", True)),
+        "qrm": bool(raw.get("qrm", True)),
+        "qsb": bool(raw.get("qsb", True)),
+        "flutter": bool(raw.get("flutter", True)),
+        "lids": bool(raw.get("lids", True)),
+        "mode": mode_val,
+    }
+
+    with DATA_LOCK:
+        users = _load_users_unlocked()
+        if user_sub in users:
+            users[user_sub]["settings"] = clean_settings
+            users[user_sub]["last_callsign"] = clean_settings["call"]
+            _atomic_write_json(USERS_FILE, users)
+    return clean_settings
+
+
 def save_score_entry(entry: dict[str, Any], user_sub: str) -> list[dict[str, Any]]:
     """Thread-safely and atomically append a validated score entry and update user stats."""
     with DATA_LOCK:
@@ -976,6 +1016,8 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
                         "picture": user.get("picture", ""),
                         "provider": user.get("provider", "auth0"),
                         "login_count": user.get("login_count", 1),
+                        "last_callsign": user.get("last_callsign", "N0CALL"),
+                        "settings": user.get("settings", {}),
                     },
                     "csrfToken": sess["csrf"],
                 }
@@ -1035,6 +1077,11 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
                 {"error": "Invalid, oversized, or non-ASCII-printable JSON payload"},
                 HTTPStatus.BAD_REQUEST,
             )
+            return
+
+        if route == "/api/settings":
+            saved = save_user_settings(user["sub"], body)
+            self._send_json({"ok": True, "settings": saved})
             return
 
         if route == "/api/scores":
