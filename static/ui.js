@@ -921,32 +921,58 @@
   });
 
   // ---------------------------------------------------------------------------
-  // Custom Call History / Master.dta Upload
+  // Built-in Master.dta (50k calls) + K1USNSST.txt (11.3k) + CWOPS.LIST (7.1k)
+  // and Custom Call History / Master.dta Upload
   // ---------------------------------------------------------------------------
+  async function loadBuiltInDatabases() {
+    try {
+      const [sstResp, cwtResp, masterResp] = await Promise.all([
+        fetch("/static/K1USNSST.txt"),
+        fetch("/static/CWOPS.LIST"),
+        fetch("/static/Master.dta"),
+      ]);
+      if (sstResp.ok) {
+        const sstText = await sstResp.text();
+        const parsedSst = ContestEngine.parseCallHistoryText(sstText);
+        if (parsedSst.length > 0) {
+          contest.sstRoster = parsedSst;
+        }
+      }
+      if (cwtResp.ok) {
+        const cwtText = await cwtResp.text();
+        const parsedCwt = ContestEngine.parseCallHistoryText(cwtText);
+        if (parsedCwt.length > 0) {
+          contest.cwtRoster = parsedCwt;
+        }
+      }
+      if (masterResp.ok) {
+        const masterBuf = await masterResp.arrayBuffer();
+        const parsedMaster = ContestEngine.parseMasterDta(masterBuf);
+        if (parsedMaster.length > 0) {
+          contest.masterRoster = parsedMaster;
+        }
+      }
+      if (contest.ini.runMode === "rmStop") {
+        contest.resetPool();
+      }
+    } catch (_e) {
+      // Fallback to built-in DEFAULT_ROSTER if offline
+    }
+  }
+
   callHistoryFile.addEventListener("change", async (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      trxStateText.textContent = "Max 2MB!";
+    if (file.size > 4 * 1024 * 1024) {
+      trxStateText.textContent = "Max 4MB!";
       return;
     }
 
-    const text = await file.text();
-    const lines = text.split(/\r?\n/);
-    const customRoster = [];
-
-    for (const rawLine of lines) {
-      if (customRoster.length >= 10000) break;
-      const line = rawLine.trim().toUpperCase();
-      if (!line || line.startsWith("#") || line.startsWith("!")) continue;
-      const parts = line.split(/[,;\t\s]+/).filter(Boolean);
-      if (parts.length >= 1 && /^[A-Z0-9/]{3,12}$/.test(parts[0])) {
-        const call = parts[0];
-        const name = parts[1] && /^[A-Z]{2,12}$/.test(parts[1]) ? parts[1] : "OM";
-        const spc = parts[2] && /^[A-Z0-9]{1,6}$/.test(parts[2]) ? parts[2] : "DX";
-        const cwt = parts[3] && /^[A-Z0-9]{1,8}$/.test(parts[3]) ? parts[3] : spc;
-        customRoster.push({ call, name, spc, cwt });
-      }
+    const buf = await file.arrayBuffer();
+    let customRoster = ContestEngine.parseMasterDta(buf);
+    if (customRoster.length === 0) {
+      const text = new TextDecoder("utf-8", { fatal: false }).decode(buf);
+      customRoster = ContestEngine.parseCallHistoryText(text);
     }
 
     if (customRoster.length > 0) {
@@ -1331,6 +1357,7 @@
 
   // Initial setup
   verifySessionAndLoadUser();
+  loadBuiltInDatabases();
   setInterval(verifySessionAndLoadUser, 15000);
   syncModeLabels();
   drawHistogram();

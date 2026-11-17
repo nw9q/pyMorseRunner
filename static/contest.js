@@ -281,7 +281,7 @@ const ContestEngine = (() => {
         return `${this.opName} ${this.spc}`;
       }
       if (mode === "rmCwt") {
-        const exch2 = Math.random() < 0.8 ? this.cwtNr : this.spc;
+        const exch2 = this.cwtNr || this.spc;
         if (this.nrWithError) {
           this.nrWithError = false;
           return `${this.opName} EEEEE ${this.opName} ${exch2}`;
@@ -1139,6 +1139,10 @@ const ContestEngine = (() => {
         spc,
         cwt,
       }));
+      this.masterRoster = []; // 50,032 unique callsigns from Master.dta (CallLst.pas)
+      this.sstRoster = []; // 11,353 real operators from K1USNSST.txt (CWSST.pas)
+      this.cwtRoster = []; // 7,120 real operators from CWOPS.LIST (CWOPS.pas)
+      this.customRoster = null; // Optional user-uploaded override
       this.availablePool = [];
 
       this.keyer = new MorseKeyer(DEFAULTRATE, this.ini.bufSize);
@@ -1167,13 +1171,33 @@ const ContestEngine = (() => {
 
     loadCustomRoster(entries) {
       if (Array.isArray(entries) && entries.length > 0) {
-        this.roster = entries;
+        this.customRoster = entries;
         this.resetPool();
       }
     }
 
+    activeRosterForMode(mode = this.ini.runMode) {
+      if (Array.isArray(this.customRoster) && this.customRoster.length > 0) {
+        return this.customRoster;
+      }
+      if (mode === "rmSst" && this.sstRoster.length > 0) {
+        return this.sstRoster;
+      }
+      if (mode === "rmCwt" && this.cwtRoster.length > 0) {
+        return this.cwtRoster;
+      }
+      if (
+        (mode === "rmWpx" || mode === "rmPileup" || mode === "rmSingle" || mode === "rmHst") &&
+        this.masterRoster.length > 0
+      ) {
+        return this.masterRoster;
+      }
+      return this.roster;
+    }
+
     resetPool() {
-      this.availablePool = this.roster.slice();
+      const source = this.activeRosterForMode(this.ini.runMode);
+      this.availablePool = source.slice();
     }
 
     pickStation() {
@@ -1690,6 +1714,94 @@ const ContestEngine = (() => {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Native Binary Master.dta Parser (CallLst.pas LoadCallList)
+  // ---------------------------------------------------------------------------
+  function parseMasterDta(arrayBuffer) {
+    const INDEXSIZE = 37 * 37 + 1; // 1370
+    const INDEXBYTES = INDEXSIZE * 4; // 5480
+    if (!arrayBuffer || arrayBuffer.byteLength < INDEXBYTES) {
+      return [];
+    }
+    const view = new DataView(arrayBuffer);
+    const idx0 = view.getUint32(0, true);
+    const idxLast = view.getUint32((INDEXSIZE - 1) * 4, true);
+    if (idx0 !== INDEXBYTES || idxLast !== arrayBuffer.byteLength) {
+      return [];
+    }
+
+    const bytes = new Uint8Array(arrayBuffer, INDEXBYTES);
+    const uniqueCalls = new Set();
+    let start = 0;
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] === 0) {
+        if (i > start) {
+          let s = "";
+          for (let j = start; j < i; j++) {
+            s += String.fromCharCode(bytes[j]);
+          }
+          const call = s.trim().toUpperCase();
+          if (call.length >= 3 && /^[A-Z0-9/]+$/.test(call)) {
+            uniqueCalls.add(call);
+          }
+        }
+        start = i + 1;
+      }
+    }
+
+    const out = [];
+    for (const call of uniqueCalls) {
+      out.push({ call, name: "OM", spc: "DX", cwt: "DX" });
+    }
+    return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // N1MM / MorseRunnerCE Call History Parser (CWSST.pas & CWOPS.pas)
+  // ---------------------------------------------------------------------------
+  function parseCallHistoryText(text) {
+    if (!text) return [];
+    const lines = text.split(/\r?\n/);
+    const seen = new Set();
+    const out = [];
+
+    for (const rawLine of lines) {
+      const trimmed = rawLine.trim();
+      if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("!!Order!!")) {
+        continue;
+      }
+      const parts = trimmed.includes(",")
+        ? trimmed.split(",")
+        : trimmed.split(/[;\t\s]+/);
+      if (parts.length >= 3) {
+        const call = (parts[0] || "").trim().toUpperCase();
+        const name = (parts[1] || "").trim().toUpperCase();
+        const exch = (parts[2] || "").trim().toUpperCase();
+        if (
+          !call ||
+          !name ||
+          !exch ||
+          name.length > 10 ||
+          exch.length > 5 ||
+          !/^[A-Z0-9/]{3,14}$/.test(call)
+        ) {
+          continue;
+        }
+        if (!seen.has(call)) {
+          seen.add(call);
+          out.push({ call, name, spc: exch, cwt: exch });
+        }
+      } else if (parts.length === 1) {
+        const call = (parts[0] || "").trim().toUpperCase();
+        if (/^[A-Z0-9/]{3,14}$/.test(call) && !seen.has(call)) {
+          seen.add(call);
+          out.push({ call, name: "OM", spc: "DX", cwt: "DX" });
+        }
+      }
+    }
+    return out;
+  }
+
   return {
     OS,
     ST,
@@ -1697,6 +1809,8 @@ const ContestEngine = (() => {
     DEFAULT_ROSTER,
     extractPrefix,
     callToScore,
+    parseMasterDta,
+    parseCallHistoryText,
     Contest,
   };
 })();
