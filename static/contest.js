@@ -606,10 +606,28 @@ const ContestEngine = (() => {
       const ini = this.contest.ini;
       if (ini.runMode === "rmHst") return ini.wpm;
       if (ini.runMode === "rmSst") {
-        // K1USN SST official rules (k1usn.com/sst_rules.html): strict 20 WPM maximum speed limit
-        const maxSst = Math.max(13, Math.min(20, ini.wpm));
-        const minSst = Math.max(12, Math.round(maxSst * 0.68));
-        return Math.round(minSst + Math.random() * (maxSst - minSst));
+        // K1USN SST speed distribution:
+        //  - ~72% match near the upper side of your CQ speed (e.g. 8-12 WPM at 10 WPM, ~14-16 WPM at 15 WPM, 18-20 WPM at 20 WPM)
+        //  - ~18% newer CW operators calling slower (down to 5-10 WPM)
+        //  - ~10% 30-WPM pros trying to throttle down (outlier +3 to +5 WPM above your speed, capped around ~20-22 WPM)
+        const myWpm = Math.max(5, Math.min(20, ini.wpm));
+        const roll = Math.random();
+        if (roll < 0.72) {
+          // Main cluster around operator's speed (skewed slightly toward upper side of myWpm)
+          const lo = Math.max(5, myWpm - 2);
+          const hi = Math.min(20, myWpm + 2);
+          return Math.round(lo + Math.pow(Math.random(), 0.75) * (hi - lo));
+        } else if (roll < 0.90) {
+          // Slower / new CW operator (5 WPM up to myWpm - 3)
+          const slowHi = Math.max(5, myWpm - 3);
+          return Math.round(5 + Math.random() * Math.max(0, slowHi - 5));
+        } else {
+          // Fast contester trying to slow down (~4-5 WPM faster than you, or ~20-22 WPM cap)
+          const fastCap = ini.lids ? 22 : 20;
+          const fastLo = Math.min(fastCap, myWpm + 3);
+          const fastHi = Math.min(fastCap, myWpm + 5);
+          return Math.round(fastLo + Math.random() * Math.max(0, fastHi - fastLo));
+        }
       }
       return Math.round(ini.wpm * 0.5 * (1 + Math.random()));
     }
@@ -1170,7 +1188,7 @@ const ContestEngine = (() => {
     }
 
     setWpm(wpm) {
-      this.ini.wpm = Math.max(10, Math.min(80, wpm));
+      this.ini.wpm = Math.max(5, Math.min(80, wpm));
       this.me.wpm = this.ini.wpm;
     }
 

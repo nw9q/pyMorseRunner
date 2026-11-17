@@ -719,7 +719,8 @@
   }
 
   function adjustWpm(delta) {
-    const nextWpm = Math.max(10, Math.min(80, contest.ini.wpm + delta));
+    const maxWpm = runModeSelect.value === "rmSst" ? 20 : 80;
+    const nextWpm = Math.max(5, Math.min(maxWpm, contest.ini.wpm + delta));
     contest.setWpm(nextWpm);
     wpmInput.value = String(nextWpm);
     wpmQuickBadge.textContent = `${nextWpm} WPM`;
