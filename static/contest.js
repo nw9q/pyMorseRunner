@@ -1180,11 +1180,18 @@ const ContestEngine = (() => {
       if (this.availablePool.length === 0) {
         this.resetPool();
       }
-      const idx = Math.floor(Math.random() * this.availablePool.length);
-      const picked = this.availablePool[idx];
-      if (this.ini.runMode === "rmHst") {
-        this.availablePool.splice(idx, 1);
+      // Prefer stations not currently active in the pileup
+      const activeCalls = new Set(this.stations.map((s) => s.myCall).filter(Boolean));
+      let idx = Math.floor(Math.random() * this.availablePool.length);
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const candidate = this.availablePool[idx];
+        if (candidate && candidate.call !== this.ini.call && !activeCalls.has(candidate.call)) {
+          break;
+        }
+        idx = Math.floor(Math.random() * this.availablePool.length);
       }
+      const picked = this.availablePool[idx];
+      this.availablePool.splice(idx, 1);
       return picked;
     }
 
