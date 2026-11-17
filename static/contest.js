@@ -93,9 +93,10 @@ const ContestEngine = (() => {
     ["N2IC", "STEVE", "NM", "55"], ["K2PO", "CLINT", "OR", "680"],
     ["W2RQ", "BILL", "NJ", "430"], ["N1DC", "RICK", "MA", "1422"],
     ["W1UE", "DENNIS", "MA", "365"], ["K1DJ", "RICH", "MA", "1595"],
-    ["AB1BX", "NED", "RI", "1940"], ["K1RV", "PIETER", "MA", "812"],
+    ["AB1BX", "NED", "RI", "1940"], ["K1RV", "PI", "MA", "812"],
     ["W1RM", "PETE", "CT", "290"], ["K1ESE", "JOHN", "ME", "1175"],
-    ["N1ZX", "STEVE", "VT", "2050"], ["KA1YQC", "DAVE", "NH", "2410"]
+    ["N1ZX", "STEVE", "VT", "2050"], ["KA1YQC", "DAVE", "NH", "2410"],
+    ["AK4EX", "STUART", "TN", "1890"], ["W3DQ", "ERIC", "DC", "1780"]
   ];
 
   // Operator states (DxOper.pas)
@@ -176,6 +177,26 @@ const ContestEngine = (() => {
       res = res.slice(0, -1) + dig;
     }
     return res.slice(0, 5);
+  }
+
+  // Extract CountryPrefix for K1USNSST.udc Multiplier2 (DXc, DoNotCountMultOnlyFor2 = K, VE)
+  function extractDxccPrefix(callRaw) {
+    const pfx = extractPrefix(callRaw);
+    if (!pfx) return "DX";
+    const stripped = pfx.replace(/[0-9]+$/, "");
+    if (!stripped) return pfx;
+    if (/^[0-9]/.test(pfx) && stripped.length === 1) {
+      return pfx.slice(0, 2);
+    }
+    if (/^D[A-R]$/.test(stripped)) return "DL";
+    if (/^J[A-S]$/.test(stripped)) return "JA";
+    return stripped;
+  }
+
+  function isUsOrCanadaCall(callRaw) {
+    const c = String(callRaw || "").toUpperCase().trim();
+    if (/^(KH6|KL7|KP4|NP2|KP2)/.test(c)) return false;
+    return /^(K|W|N|A[A-L]|VE|VA|VO|VY)/.test(c);
   }
 
   // ---------------------------------------------------------------------------
@@ -313,9 +334,15 @@ const ContestEngine = (() => {
         case "msgNR":
           this.sendText("<#>");
           break;
-        case "msgTU":
-          this.sendText(isSst ? "TU 73" : "TU");
+        case "msgTU": {
+          if (isSst) {
+            const hName = String(this.hisName || "").trim().toUpperCase();
+            this.sendText(hName ? `TU ${hName} 73` : "TU 73");
+          } else {
+            this.sendText("TU");
+          }
           break;
+        }
         case "msgMyCall":
           this.sendText("<my>");
           break;
@@ -331,9 +358,27 @@ const ContestEngine = (() => {
         case "msgNil":
           this.sendText("NIL");
           break;
-        case "msgR_NR":
-          this.sendText(isSst && Math.random() < 0.5 ? "TU <#>" : "R <#>");
+        case "msgR_NR": {
+          if (isSst) {
+            // Per K1USN SST rules (k1usn.com/sst_rules.html): friendly greetings with runner's name
+            const runnerName = String(this.contest.ini.hamName || "").trim().toUpperCase();
+            const r = Math.random();
+            if (runnerName && r < 0.25) {
+              this.sendText(`GM ${runnerName} <#>`);
+            } else if (runnerName && r < 0.45) {
+              this.sendText(`GA ${runnerName} <#>`);
+            } else if (runnerName && r < 0.60) {
+              this.sendText(`GE ${runnerName} <#>`);
+            } else if (runnerName && r < 0.80) {
+              this.sendText(`TU ${runnerName} <#>`);
+            } else {
+              this.sendText("R <#>");
+            }
+          } else {
+            this.sendText("R <#>");
+          }
           break;
+        }
         case "msgR_NR2":
           this.sendText("R <#> <#>");
           break;
@@ -561,8 +606,8 @@ const ContestEngine = (() => {
       const ini = this.contest.ini;
       if (ini.runMode === "rmHst") return ini.wpm;
       if (ini.runMode === "rmSst") {
-        // K1USN SST rules: welcoming speeds, typically 13 to 20 WPM (or up to user WPM)
-        const maxSst = Math.max(15, Math.min(24, ini.wpm));
+        // K1USN SST official rules (k1usn.com/sst_rules.html): strict 20 WPM maximum speed limit
+        const maxSst = Math.max(13, Math.min(20, ini.wpm));
         const minSst = Math.max(12, Math.round(maxSst * 0.68));
         return Math.round(minSst + Math.random() * (maxSst - minSst));
       }
@@ -1411,8 +1456,13 @@ const ContestEngine = (() => {
       }
       const mode = this.ini.runMode;
       if (mode === "rmSst") {
+        const dxcc = extractDxccPrefix(qso.trueCall || qso.call);
+        const validSpc =
+          qso.recv2 === qso.trueSpc ||
+          (!isUsOrCanadaCall(qso.trueCall || qso.call) &&
+            (qso.recv2 === "DX" || qso.recv2 === dxcc));
         if (qso.recv1 !== qso.trueName) qso.err = "NAM";
-        else if (qso.recv2 !== qso.trueSpc) qso.err = "SPC";
+        else if (!validSpc) qso.err = "SPC";
         else qso.err = "   ";
       } else if (mode === "rmCwt") {
         if (qso.recv1 !== qso.trueName) qso.err = "NAM";
@@ -1447,7 +1497,11 @@ const ContestEngine = (() => {
       const mode = this.ini.runMode;
       let mult = "";
       if (mode === "rmSst") {
-        mult = recv2;
+        // K1USNSST.udc: Multiplier1 = Sect (48SDC14P + AK/HI), Multiplier2 = CountryPrefix (DXc, excluding K & VE)
+        mult =
+          !isUsOrCanadaCall(cleanCall) && recv2 === "DX"
+            ? extractDxccPrefix(cleanCall)
+            : recv2;
       } else if (mode === "rmCwt") {
         mult = cleanCall;
       } else if (mode === "rmHst") {

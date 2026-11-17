@@ -611,14 +611,14 @@ def build_cabrillo(payload: dict[str, Any]) -> str:
         qsos = []
 
     contest_map = {
-        "SST": "K1USN-SST",
+        "SST": "K1USNSST",
         "CWT": "CWOPS-CWT",
         "WPX": "CQ-WPX-CW",
         "PILEUP": "CQ-WPX-CW",
         "SINGLE": "CQ-WPX-CW",
         "HST": "IARU-HST",
     }
-    contest_name = contest_map.get(mode_id, "K1USN-SST")
+    contest_name = contest_map.get(mode_id, "K1USNSST")
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     date_str = now_utc.strftime("%Y-%m-%d")
 
@@ -641,13 +641,21 @@ def build_cabrillo(payload: dict[str, Any]) -> str:
         sent_2 = sanitize_field(q.get("sent2"), 10)
         recv_1 = sanitize_field(q.get("recv1"), 10)
         recv_2 = sanitize_field(q.get("recv2"), 10)
-        if mode_id in ("SST", "CWT"):
-            sent_1 = sent_1 or my_name
-            sent_2 = sent_2 or my_spc
-        lines.append(
-            f"QSO: 14032 CW {date_str} {utc_time} {my_call:<13} {sent_1:<6} {sent_2:<6} "
-            f"{his_call:<13} {recv_1:<6} {recv_2:<6}"
-        )
+        if mode_id == "SST":
+            # K1USNSST.udc: CabrilloString = SentExch, 15, CallSign, 13, Name, 10, Exchange1, 5
+            sent_exch = f"{sent_1 or my_name} {sent_2 or my_spc}"[:15]
+            lines.append(
+                f"QSO: 14032 CW {date_str} {utc_time} {my_call:<13} {sent_exch:<15} "
+                f"{his_call:<13} {recv_1:<10} {recv_2:<5}"
+            )
+        else:
+            if mode_id == "CWT":
+                sent_1 = sent_1 or my_name
+                sent_2 = sent_2 or my_spc
+            lines.append(
+                f"QSO: 14032 CW {date_str} {utc_time} {my_call:<13} {sent_1:<6} {sent_2:<6} "
+                f"{his_call:<13} {recv_1:<6} {recv_2:<6}"
+            )
 
     lines.append("END-OF-LOG:")
     return "\r\n".join(lines) + "\r\n"

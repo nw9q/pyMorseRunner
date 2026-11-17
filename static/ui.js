@@ -119,8 +119,8 @@
     if (mode === "rmSst") {
       labelExch1.textContent = "Name";
       exch1Input.placeholder = "NAME";
-      labelExch2.textContent = "State / SPC";
-      exch2Input.placeholder = "SPC";
+      labelExch2.textContent = "State / Prov / DX";
+      exch2Input.placeholder = "S/P/DX";
       thRecv.textContent = "Recv (Name / SPC)";
       thSent.textContent = "Sent (Name / SPC)";
       f2KeyText.textContent = "<Name SPC>";
@@ -260,7 +260,13 @@
     contest.ini.hamName = myNameInput.value;
     contest.ini.mySpc = mySpcInput.value;
     contest.ini.myCwt = myCwtInput.value;
-    contest.setWpm(Number(wpmInput.value) || 20);
+    let targetWpm = Number(wpmInput.value) || 20;
+    if (runModeSelect.value === "rmSst" && targetWpm > 20) {
+      targetWpm = 20;
+      wpmInput.value = "20";
+      wpmQuickBadge.textContent = "20 WPM";
+    }
+    contest.setWpm(targetWpm);
     contest.setPitch(Number(pitchSelect.value) || 600);
     contest.setBandwidth(Number(bwSelect.value) || 500);
     const monDb = Number(monGainInput.value);
@@ -390,6 +396,9 @@
     }
     if (msg === "msgNR") {
       contest.nrSent = true;
+    }
+    if (msg === "msgTU") {
+      contest.me.hisName = isNameExchMode() ? exch1Input.value.trim().toUpperCase() : "";
     }
     contest.me.sendMsg(msg);
   }
