@@ -10,6 +10,19 @@ A cross-platform Python + WebAudio port of Alex Shovkoplyas's (**VE3NEA**) class
 
 ---
 
+This software is alpha and untested.
+
+## TODO
+
+- Test contest adherence to rules.
+
+  -[ ] SST
+  -[ ] others...
+
+- Add POTA CW session 
+- Fix AUTH  
+
+
 ## Quick Start (Docker Container)
 
 ```bash
