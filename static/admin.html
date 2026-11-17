@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Station Admin — pyMorseRunner</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-group">
+      <span class="brand-badge">ADMIN</span>
+      <div class="brand-title">
+        <h1>pyMorseRunner &mdash; Station Administration</h1>
+        <p>Operator Roster, Identity Metadata, Active Session Control &amp; Access Policy</p>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <span id="adminSelfBadge" class="user-chip"></span>
+      <button id="refreshUsersBtn" type="button" class="btn">&#8635; Refresh</button>
+      <a href="/" class="btn btn-primary">&larr; Back to Simulator</a>
+      <a href="/auth/logout" class="btn">Sign Out</a>
+    </div>
+  </header>
+
+  <main class="admin-main">
+    <div id="adminBanner" class="login-alert" hidden></div>
+
+    <section class="admin-stats-grid" aria-label="System Summary">
+      <div class="panel stat-card">
+        <span class="stat-label">Total Operators</span>
+        <strong id="statTotalUsers" class="stat-value">0</strong>
+      </div>
+      <div class="panel stat-card">
+        <span class="stat-label">Active Sessions</span>
+        <strong id="statActiveSessions" class="stat-value">0</strong>
+      </div>
+      <div class="panel stat-card">
+        <span class="stat-label">Administrators</span>
+        <strong id="statAdmins" class="stat-value">0</strong>
+      </div>
+      <div class="panel stat-card">
+        <span class="stat-label">Blocked Accounts</span>
+        <strong id="statBlocked" class="stat-value">0</strong>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <span>Registered Operators &amp; Auth0 Telemetry Metadata</span>
+        <span id="lastUpdatedLabel">Live</span>
+      </div>
+
+      <div class="admin-table-wrap">
+        <table class="log-table admin-table" aria-label="Registered Users and Metadata">
+          <thead>
+            <tr>
+              <th>Operator / Email</th>
+              <th>Role &amp; Status</th>
+              <th>Auth0 Sub &amp; IdP</th>
+              <th>Contest Telemetry</th>
+              <th>Session &amp; Network Metadata</th>
+              <th>Timestamps (UTC)</th>
+              <th>Admin Actions</th>
+            </tr>
+          </thead>
+          <tbody id="adminUsersBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>

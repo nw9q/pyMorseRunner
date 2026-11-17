@@ -1,0 +1,27 @@
+services:
+  morse-runner:
+    build: .
+    container_name: morse-runner
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: "8073"
+      HOST: "0.0.0.0"
+    ports:
+      - "8073:8073"
+    volumes:
+      - morse_runner_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16M,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+
+volumes:
+  morse_runner_data:

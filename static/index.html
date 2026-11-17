@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>pyMorseRunner — CW &amp; K1USN SST Contest Simulator</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-group">
+      <span class="brand-badge">CW SIM</span>
+      <div class="brand-title">
+        <h1>pyMorseRunner</h1>
+        <p>VE3NEA DSP Engine + N1MM ESM &amp; K1USN SST / CWT / WPX Trainer</p>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <label for="runModeSelect" class="sr-only">Contest Mode</label>
+      <select id="runModeSelect" class="mode-select" aria-label="Contest Mode">
+        <option value="rmSst" selected>K1USN SST (Name + State/SPC, &le;20 WPM)</option>
+        <option value="rmCwt">CWops CWT (Name + Member# / SPC)</option>
+        <option value="rmPileup">Pile-Up (Classic WPX: RST + Serial#)</option>
+        <option value="rmSingle">Single Calls (RST + Serial#)</option>
+        <option value="rmWpx">WPX Competition (Locked Conditions)</option>
+        <option value="rmHst">IARU HST Competition</option>
+      </select>
+
+      <button id="runToggleBtn" type="button" class="btn btn-primary">&#9654; Start Contest</button>
+      <button id="exportCabrilloBtn" type="button" class="btn" title="Download Cabrillo .log file">Export Cabrillo</button>
+      <button id="exportAdifBtn" type="button" class="btn" title="Download ADIF .adi file for Mac loggers">Export ADIF</button>
+      <button id="downloadWavBtn" type="button" class="btn" title="Download recorded session audio as WAV" disabled>Save WAV</button>
+      <span id="userInfoChip" class="user-chip" title="Authenticated Operator">Operator</span>
+      <a id="adminPortalLink" href="/admin" class="btn" hidden>Admin</a>
+      <a href="/auth/logout" class="btn" title="Sign Out">Sign Out</a>
+    </div>
+  </header>
+
+  <main class="workspace-grid">
+    <!-- Left Column: Log, Entry Bar, F-Keys, Passband Visualizer -->
+    <section class="left-column">
+      <div class="panel">
+        <div class="panel-title">
+          <span id="activeModeLabel">Mode: K1USN Slow Speed Test (SST)</span>
+          <span id="clockAndRateLabel">00:00:00 &bull; Rate: 0 QSO/hr &bull; Pileup: 0</span>
+        </div>
+
+        <div id="logContainer" class="log-container">
+          <table class="log-table" aria-label="Contest QSO Log">
+            <thead>
+              <tr>
+                <th>UTC</th>
+                <th>Callsign</th>
+                <th id="thRecv">Recv (Name / SPC)</th>
+                <th id="thSent">Sent (Name / SPC)</th>
+                <th>Mult</th>
+                <th>Chk</th>
+              </tr>
+            </thead>
+            <tbody id="logTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Entry Bar & Function Keys -->
+      <div class="panel">
+        <div class="entry-bar">
+          <div class="field-group">
+            <label for="callInput">Callsign</label>
+            <input id="callInput" type="text" maxlength="15" class="entry-input" autocomplete="off" spellcheck="false" placeholder="CALL">
+          </div>
+          <div class="field-group">
+            <label id="labelExch1" for="exch1Input">Name</label>
+            <input id="exch1Input" type="text" maxlength="12" class="entry-input" autocomplete="off" spellcheck="false" placeholder="NAME">
+          </div>
+          <div class="field-group">
+            <label id="labelExch2" for="exch2Input">State / SPC</label>
+            <input id="exch2Input" type="text" maxlength="10" class="entry-input" autocomplete="off" spellcheck="false" placeholder="SPC">
+          </div>
+          <div class="field-group">
+            <button id="wipeBtn" type="button" class="btn" title="Wipe Entry (Alt+W / F11)">Wipe (F11)</button>
+          </div>
+        </div>
+
+        <div class="fkey-grid" role="group" aria-label="CW Function Key Macros">
+          <button type="button" class="fkey-btn" data-msg="msgCQ"><span>F1</span>CQ</button>
+          <button type="button" class="fkey-btn" data-msg="msgNR"><span id="f2KeyLabel">F2</span><em id="f2KeyText">&lt;Exch&gt;</em></button>
+          <button type="button" class="fkey-btn" data-msg="msgTU"><span>F3</span>TU</button>
+          <button type="button" class="fkey-btn" data-msg="msgMyCall"><span>F4</span>&lt;my&gt;</button>
+          <button type="button" class="fkey-btn" data-msg="msgHisCall"><span>F5</span>&lt;his&gt;</button>
+          <button type="button" class="fkey-btn" data-msg="msgB4"><span>F6</span>QSO B4</button>
+          <button type="button" class="fkey-btn" data-msg="msgQm"><span>F7</span>?</button>
+          <button type="button" class="fkey-btn" data-msg="msgNil"><span>F8</span>NIL</button>
+        </div>
+
+        <div class="status-strip">
+          <div class="status-pill">
+            <span class="status-pill-left">
+              <span id="txLed" class="tx-led"></span>
+              <span id="trxStateText">RX Ready</span>
+            </span>
+          </div>
+          <div class="status-pill">
+            <span>RIT:<strong id="ritValueText" class="rit-text">0 Hz</strong></span>
+            <span class="rit-btn-group">
+              <button id="ritDownBtn" type="button" class="btn btn-xs" title="RIT Down (Down Arrow)">-</button>
+              <button id="ritResetBtn" type="button" class="btn btn-xs" title="Clear RIT">0</button>
+              <button id="ritUpBtn" type="button" class="btn btn-xs" title="RIT Up (Up Arrow)">+</button>
+            </span>
+          </div>
+          <div class="status-pill">
+            <span>BW:</span>
+            <strong id="bwStatusText">500 Hz</strong>
+          </div>
+          <div class="status-pill" title="Receiver S-Meter (Signal Strength)">
+            <span>S-Meter</span>
+            <canvas id="smeterCanvas" class="smeter-canvas" width="120" height="10"></canvas>
+            <strong id="smeterText" class="smeter-reading">S1</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- Passband Spectrum & Rate Histogram -->
+      <div class="panel">
+        <div class="panel-title">
+          <span>Filter Window</span>
+          <span>5-Min QSO Rate Histogram</span>
+        </div>
+        <div class="canvas-row">
+          <canvas id="passbandCanvas" class="passband-canvas" width="560" height="86"></canvas>
+          <canvas id="histoCanvas" class="histo-canvas" width="220" height="86"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Column: Station Settings, Band Conditions, Score Table -->
+    <aside class="right-column">
+      <div class="panel">
+        <div class="panel-title">
+          <span>Station Settings</span>
+          <span id="wpmQuickBadge">20 WPM</span>
+        </div>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label for="myCallInput">My Callsign</label>
+            <input id="myCallInput" type="text" maxlength="15" value="N9FZ" spellcheck="false">
+          </div>
+          <div class="setting-item">
+            <label for="myNameInput">My Name (SST/CWT)</label>
+            <input id="myNameInput" type="text" maxlength="12" value="BOB" spellcheck="false">
+          </div>
+          <div class="setting-item">
+            <label for="mySpcInput">My State/SPC</label>
+            <input id="mySpcInput" type="text" maxlength="6" value="IN" spellcheck="false">
+          </div>
+          <div class="setting-item">
+            <label for="myCwtInput">My CWT # / Exch</label>
+            <input id="myCwtInput" type="text" maxlength="8" value="2104" spellcheck="false">
+          </div>
+          <div class="setting-item">
+            <label for="wpmInput">CW Speed (WPM)</label>
+            <input id="wpmInput" type="number" min="10" max="80" step="1" value="20">
+          </div>
+          <div class="setting-item">
+            <label for="pitchSelect">CW Pitch (Hz)</label>
+            <select id="pitchSelect">
+              <option value="400">400 Hz</option>
+              <option value="450">450 Hz</option>
+              <option value="500">500 Hz</option>
+              <option value="550">550 Hz</option>
+              <option value="600" selected>600 Hz</option>
+              <option value="650">650 Hz</option>
+              <option value="700">700 Hz</option>
+              <option value="750">750 Hz</option>
+              <option value="800">800 Hz</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label for="bwSelect">RX Bandwidth</label>
+            <select id="bwSelect">
+              <option value="150">150 Hz</option>
+              <option value="200">200 Hz</option>
+              <option value="250">250 Hz</option>
+              <option value="300">300 Hz</option>
+              <option value="350">350 Hz</option>
+              <option value="400">400 Hz</option>
+              <option value="450">450 Hz</option>
+              <option value="500" selected>500 Hz</option>
+              <option value="600">600 Hz</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label for="monGainInput">Sidetone (<span id="monGainValText">-6 dB</span>)</label>
+            <input id="monGainInput" type="range" min="-30" max="6" step="1" value="-6">
+          </div>
+        </div>
+        <div class="checkbox-grid">
+          <label class="check-label"><input id="qskCheck" type="checkbox" checked> QSK Semi-Break-In</label>
+          <label class="check-label"><input id="recWavCheck" type="checkbox" checked> Record WAV</label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          <span>Band Conditions</span>
+          <span>ITU / VE3NEA DSP</span>
+        </div>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label for="activityInput">Activity (1-9)</label>
+            <input id="activityInput" type="number" min="1" max="9" value="3">
+          </div>
+          <div class="setting-item">
+            <label for="durationInput">Duration (Min)</label>
+            <input id="durationInput" type="number" min="1" max="120" value="30">
+          </div>
+          <div class="setting-item full-width">
+            <label for="qrnModelSelect">QRN Static Model</label>
+            <select id="qrnModelSelect">
+              <option value="middleton" selected>Middleton Class B (Sferics)</option>
+              <option value="ve3nea">Classic VE3NEA</option>
+            </select>
+          </div>
+          <div class="setting-item full-width">
+            <label for="callHistoryFile">Custom Call History (.txt / .csv / .dta)</label>
+            <input id="callHistoryFile" type="file" accept=".txt,.csv,.dta">
+          </div>
+        </div>
+        <div class="checkbox-grid">
+          <label class="check-label"><input id="qrnCheck" type="checkbox" unchecked> QRN (Static Crashes)</label>
+          <label class="check-label"><input id="qrmCheck" type="checkbox" unchecked> QRM (Interference)</label>
+          <label class="check-label"><input id="qsbCheck" type="checkbox" unchecked> QSB (Rayleigh Fade)</label>
+          <label class="check-label"><input id="flutterCheck" type="checkbox" unchecked> Auroral Flutter</label>
+          <label class="check-label"><input id="lidsCheck" type="checkbox" unchecked> LIDS (Op Mistakes)</label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          <span>Contest Score</span>
+          <span id="crcBadgeText"></span>
+        </div>
+        <table class="score-table" aria-label="Score Summary">
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th>Raw</th>
+              <th>Verified</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Points / QSOs</td>
+              <td id="rawPtsCell">0</td>
+              <td id="valPtsCell">0</td>
+            </tr>
+            <tr>
+              <td>Multipliers</td>
+              <td id="rawMulCell">0</td>
+              <td id="valMulCell">0</td>
+            </tr>
+            <tr>
+              <td><strong>Total Score</strong></td>
+              <td id="rawScoreCell"><strong>0</strong></td>
+              <td id="valScoreCell"><strong>0</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="shortcuts-bar">
+    <span><kbd>Enter</kbd> ESM (CQ &rarr; Exch &rarr; TU &amp; Log)</span>
+    <span><kbd>Space</kbd> Next Field (or type <code>NAME SPC</code> in Name box)</span>
+    <span><kbd>F1</kbd>&ndash;<kbd>F8</kbd> Send CW Macros</span>
+    <span><kbd>;</kbd> or <kbd>Ins</kbd> Send &lt;his&gt; + Exch</span>
+    <span><kbd>.</kbd> or <kbd>+</kbd> Send TU &amp; Save</span>
+    <span><kbd>Esc</kbd> Abort TX</span>
+    <span><kbd>Alt+W</kbd> / <kbd>F11</kbd> Wipe</span>
+    <span><kbd>&uarr;</kbd> / <kbd>&darr;</kbd> RIT &plusmn;50 Hz</span>
+    <span><kbd>PgUp</kbd> / <kbd>PgDn</kbd> Speed WPM</span>
+  </footer>
+
+  <script src="/static/dsp.js"></script>
+  <script src="/static/contest.js"></script>
+  <script src="/static/ui.js"></script>
+</body>
+</html>

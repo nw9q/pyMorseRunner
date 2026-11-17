@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+data/*.json
+data/*.log
+data/*.adi
+data/.session_secret
+data/.*
+._*

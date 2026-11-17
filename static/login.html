@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Sign In — pyMorseRunner CW Contest Simulator</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="panel login-card" aria-labelledby="loginTitle">
+      <div class="login-brand">
+        <span class="brand-badge">CW SIM</span>
+        <div>
+          <h1 id="loginTitle">pyMorseRunner</h1>
+          <p class="login-subtitle">HF CW Pile-Up, K1USN SST, CWops CWT &amp; WPX Contest Simulator</p>
+        </div>
+      </div>
+
+      <div id="loginAlertBox" class="login-alert" hidden></div>
+
+      <p class="login-lead">
+        Sign in with your account via <strong>Auth0</strong> to access the pyMorseRunner contest interface.
+      </p>
+
+      <div class="login-actions">
+        <a id="auth0LoginBtn" href="/auth/login" class="btn btn-primary btn-login-full">
+          &#128274; Sign In with Auth0
+        </a>
+      </div>
+
+      <hr class="login-divider">
+
+      <!-- Homage to Alex Shovkoplyas, VE3NEA -->
+      <section class="tribute-box" aria-labelledby="tributeHeading">
+        <h2 id="tributeHeading" class="tribute-title">
+          About pyMorseRunner
+        </h2>
+        <p>
+          <strong>pyMorseRunner</strong> attempts to be a faithful port of
+          <strong>Morse Runner 1.68</strong>, created by
+          <strong>Alex Shovkoplyas, VE3NEA</strong> (Copyright &copy; 2004&ndash;2006, Afreet Software, Inc. &bull;
+          <a href="http://www.dxatlas.com/MorseRunner/" target="_blank" rel="noopener noreferrer">dxatlas.com/MorseRunner</a>).
+        </p>
+        <p>
+          For over two decades, Alex&rsquo;s elegant baseband I/Q DSP filter design, windowed log-magnitude AGC, Rayleigh fading, and dynamic-programming pileup caller AI have been the gold standard for CW operators preparing for CQ WW, WPX, IARU HST, CWops CWT, and the K1USN Slow Speed Test. We gratefully acknowledge VE3NEA&rsquo;s generosity in releasing Morse Runner as open-source software for the global amateur radio community.
+        </p>
+      </section>
+
+      <!-- MPL-2.0 License Notice -->
+      <section class="license-box" aria-labelledby="licenseHeading">
+        <div class="license-header">
+          <h3 id="licenseHeading">Open Source License &mdash; Mozilla Public License 2.0 (MPL-2.0)</h3>
+          <span class="badge-pill">MPL-2.0</span>
+        </div>
+        <pre class="license-text">This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+Original Morse Runner 1.68 Engine &amp; DSP Algorithms:
+Copyright (C) 2004-2006 Alex Shovkoplyas, VE3NEA (ve3nea@dxatlas.com)
+
+pyMorseRunner Python / WebAudio Port, K1USN SST / CWT Modes &amp; Middleton Class B QRN:
+Licensed under the Mozilla Public License Version 2.0 (MPL-2.0).
+Provided "AS IS" without warranty of any kind, either expressed or implied.</pre>
+      </section>
+    </section>
+  </main>
+
+  <script src="/static/login.js"></script>
+</body>
+</html>
