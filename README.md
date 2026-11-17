@@ -10,7 +10,7 @@ A cross-platform Python + WebAudio port of Alex Shovkoplyas's (**VE3NEA**) class
 
 ---
 
-This software is alpha and untested.
+This software is alpha and untested. For a preview, see [pyMorseRunner](https://morserunner.adelphos.org).
 
 ## TODO
 
