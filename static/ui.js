@@ -600,9 +600,11 @@
 
     const c = contest.callSent;
     const n = contest.nrSent;
-    const hasExch = isNameExchMode()
-      ? exch1Input.value.trim() !== "" && exch2Input.value.trim() !== ""
-      : exch2Input.value.trim() !== "";
+    const e1 = exch1Input.value.trim().toUpperCase();
+    const e2 = exch2Input.value.trim().toUpperCase();
+    const e1Valid = e1 !== "" && !e1.includes("?");
+    const e2Valid = e2 !== "" && !e2.includes("?");
+    const hasExch = isNameExchMode() ? e1Valid && e2Valid : e2Valid;
 
     if (!c || (!n && !hasExch)) {
       sendMsg("msgHisCall");
@@ -611,7 +613,19 @@
       sendMsg("msgNR");
     }
     if (n && !hasExch) {
-      sendMsg("msgQm");
+      if (isNameExchMode()) {
+        if (!e1Valid && e2Valid) {
+          sendMsg("msgNameQm");
+        } else if (e1Valid && !e2Valid) {
+          sendMsg("msgStQm");
+        } else if (e1.includes("?")) {
+          sendMsg("msgNameQm");
+        } else {
+          sendMsg("msgQm");
+        }
+      } else {
+        sendMsg("msgQm");
+      }
     }
 
     if (hasExch && (c || n)) {
@@ -629,21 +643,35 @@
 
   contest.onAdvanceCursor = () => {
     if (!mustAdvance) return;
-    if (!callInput.value.includes("?")) {
-      if (!isNameExchMode() && !exch1Input.value.trim()) {
-        exch1Input.value = "599";
-      }
-      if (isNameExchMode()) {
-        exch1Input.focus();
-      } else {
-        exch2Input.focus();
-      }
-    } else {
+    if (callInput.value.includes("?")) {
       callInput.focus();
       const qIdx = callInput.value.indexOf("?");
       if (qIdx >= 0) {
         callInput.setSelectionRange(qIdx, callInput.value.length);
       }
+    } else if (isNameExchMode()) {
+      const e1 = exch1Input.value.trim();
+      const e2 = exch2Input.value.trim();
+      if (!e1 || e1.includes("?")) {
+        exch1Input.focus();
+        const qIdx = exch1Input.value.indexOf("?");
+        if (qIdx >= 0) {
+          exch1Input.setSelectionRange(qIdx, exch1Input.value.length);
+        }
+      } else if (!e2 || e2.includes("?")) {
+        exch2Input.focus();
+        const qIdx = exch2Input.value.indexOf("?");
+        if (qIdx >= 0) {
+          exch2Input.setSelectionRange(qIdx, exch2Input.value.length);
+        }
+      } else {
+        exch1Input.focus();
+      }
+    } else {
+      if (!exch1Input.value.trim()) {
+        exch1Input.value = "599";
+      }
+      exch2Input.focus();
     }
     mustAdvance = false;
   };
@@ -660,7 +688,7 @@
   });
 
   exch1Input.addEventListener("input", () => {
-    const val = taintClean(exch1Input.value, /[^A-Z0-9\s]/g, 12);
+    const val = taintClean(exch1Input.value, /[^A-Z0-9?\s]/g, 12);
     if (isNameExchMode() && val.endsWith(" ") && val.trim().length > 0) {
       exch1Input.value = val.trim();
       exch2Input.focus();
@@ -670,7 +698,7 @@
   });
 
   exch2Input.addEventListener("input", () => {
-    exch2Input.value = taintClean(exch2Input.value, /[^A-Z0-9]/g, 10);
+    exch2Input.value = taintClean(exch2Input.value, /[^A-Z0-9?]/g, 10);
   });
 
   myCallInput.addEventListener("input", () => {
@@ -715,6 +743,16 @@
   window.addEventListener("keydown", (e) => {
     if (FKEY_MAP[e.key]) {
       e.preventDefault();
+      if (e.key === "F7" && isNameExchMode() && contest.nrSent) {
+        if (document.activeElement === exch1Input) {
+          sendMsg("msgNameQm");
+          return;
+        }
+        if (document.activeElement === exch2Input) {
+          sendMsg("msgStQm");
+          return;
+        }
+      }
       sendMsg(FKEY_MAP[e.key]);
       return;
     }

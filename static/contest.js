@@ -355,6 +355,20 @@ const ContestEngine = (() => {
         case "msgQm":
           this.sendText("?");
           break;
+        case "msgNameQm":
+          this.sendText("NAME?");
+          break;
+        case "msgStQm":
+          this.sendText(this.contest.ini.runMode === "rmCwt" ? "NR?" : "ST?");
+          break;
+        case "msgOnlyName":
+          this.sendText(`${this.opName} ${this.opName}`);
+          break;
+        case "msgOnlySpc": {
+          const spcTxt = this.contest.ini.runMode === "rmCwt" ? (this.cwtNr || this.spc) : this.spc;
+          this.sendText(`${spcTxt} ${spcTxt}`);
+          break;
+        }
         case "msgNil":
           this.sendText("NIL");
           break;
@@ -593,6 +607,7 @@ const ContestEngine = (() => {
       this.patience = FULL_PATIENCE;
       this.repeatCnt = 1;
       this.state = OS.NeedPrevEnd;
+      this.lastFillReq = "";
     }
 
     getSendDelay() {
@@ -776,9 +791,17 @@ const ContestEngine = (() => {
         return;
       }
 
-      if (aMsg.has("msgQm") && !aMsg.has("msgHisCall") && !aMsg.has("msgNR")) {
+      if (
+        (aMsg.has("msgQm") || aMsg.has("msgNameQm") || aMsg.has("msgStQm")) &&
+        !aMsg.has("msgHisCall") &&
+        !aMsg.has("msgNR")
+      ) {
         if (this.state === OS.NeedPrevEnd) {
           this.setState(OS.NeedQso);
+        } else if (this.state === OS.NeedEnd) {
+          if (aMsg.has("msgNameQm")) this.lastFillReq = "name";
+          else if (aMsg.has("msgStQm")) this.lastFillReq = "spc";
+          else this.lastFillReq = "";
         }
       }
 
@@ -874,7 +897,17 @@ const ContestEngine = (() => {
           return isHst || Math.random() > 0.5 ? "msgDeMyCall1" : "msgDeMyCall2";
         default:
           // osNeedEnd
-          if (this.patience < FULL_PATIENCE - 1) return "msgNR";
+          if (this.patience < FULL_PATIENCE - 1) {
+            if (this.lastFillReq === "name") {
+              this.lastFillReq = "";
+              return "msgOnlyName";
+            }
+            if (this.lastFillReq === "spc") {
+              this.lastFillReq = "";
+              return "msgOnlySpc";
+            }
+            return "msgNR";
+          }
           return isHst || Math.random() < 0.9 ? "msgR_NR" : "msgR_NR2";
       }
     }
