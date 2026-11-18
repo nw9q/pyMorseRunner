@@ -1281,6 +1281,7 @@ const ContestEngine = (() => {
 
     initRun(mode) {
       this.ini.runMode = mode;
+      this.ini.duration = Math.max(1, Math.min(60, Number(this.ini.duration) || 30));
       this.blockNumber = 0;
       this.ritPhase = 0;
       this.stations = [];

@@ -15,6 +15,7 @@
   const downloadWavBtn = document.getElementById("downloadWavBtn");
   const userInfoChip = document.getElementById("userInfoChip");
   const adminPortalLink = document.getElementById("adminPortalLink");
+  const signOutLink = document.getElementById("signOutLink");
 
   let csrfToken = "";
 
@@ -75,7 +76,6 @@
   const activityInput = document.getElementById("activityInput");
   const durationInput = document.getElementById("durationInput");
   const qrnModelSelect = document.getElementById("qrnModelSelect");
-  const callHistoryFile = document.getElementById("callHistoryFile");
   const qrnCheck = document.getElementById("qrnCheck");
   const qrmCheck = document.getElementById("qrmCheck");
   const qsbCheck = document.getElementById("qsbCheck");
@@ -273,7 +273,9 @@
     contest.ini.monVolumeDb = Number.isFinite(monDb) ? monDb : -6;
     contest.ini.qsk = qskCheck.checked;
     contest.ini.activity = Math.max(1, Math.min(9, Number(activityInput.value) || 3));
-    contest.ini.duration = Math.max(1, Math.min(120, Number(durationInput.value) || 30));
+    const clampedDur = Math.max(1, Math.min(60, Number(durationInput.value) || 30));
+    durationInput.value = String(clampedDur);
+    contest.ini.duration = clampedDur;
     contest.ini.qrnModel = qrnModelSelect.value;
     contest.ini.qrn = qrnCheck.checked;
     contest.ini.qrm = qrmCheck.checked;
@@ -364,7 +366,9 @@
     }
     if (typeof s.qsk === "boolean") qskCheck.checked = s.qsk;
     if (Number.isFinite(Number(s.activity))) activityInput.value = String(s.activity);
-    if (Number.isFinite(Number(s.duration))) durationInput.value = String(s.duration);
+    if (Number.isFinite(Number(s.duration))) {
+      durationInput.value = String(Math.max(1, Math.min(60, Number(s.duration))));
+    }
     if (s.qrnModel === "middleton" || s.qrnModel === "ve3nea") qrnModelSelect.value = s.qrnModel;
     if (typeof s.qrn === "boolean") qrnCheck.checked = s.qrn;
     if (typeof s.qrm === "boolean") qrmCheck.checked = s.qrm;
@@ -998,27 +1002,6 @@
     }
   }
 
-  callHistoryFile.addEventListener("change", async (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    if (file.size > 4 * 1024 * 1024) {
-      trxStateText.textContent = "Max 4MB!";
-      return;
-    }
-
-    const buf = await file.arrayBuffer();
-    let customRoster = ContestEngine.parseMasterDta(buf);
-    if (customRoster.length === 0) {
-      const text = new TextDecoder("utf-8", { fatal: false }).decode(buf);
-      customRoster = ContestEngine.parseCallHistoryText(text);
-    }
-
-    if (customRoster.length > 0) {
-      contest.loadCustomRoster(customRoster);
-      trxStateText.textContent = `${customRoster.length} Calls`;
-    }
-  });
-
   // ---------------------------------------------------------------------------
   // Rendering QSO Log, Score Table & Histogram
   // ---------------------------------------------------------------------------
@@ -1351,7 +1334,7 @@
     URL.revokeObjectURL(url);
   });
 
-  // Auth0 Session Verification & Live Kick/Block Enforcement
+  // Session Verification (Optional Auth0 for Admin, Public Visitor CSRF & Telemetry)
   async function verifySessionAndLoadUser() {
     try {
       const resp = await fetch("/api/me");
@@ -1363,15 +1346,26 @@
       if (!resp.ok) return;
       const data = await resp.json();
       csrfToken = data.csrfToken || "";
-      if (data.user && userInfoChip) {
-        userInfoChip.textContent = `${data.user.name} (${data.user.role.toUpperCase()})`;
+      if (data.authenticated && data.user) {
+        if (userInfoChip) {
+          userInfoChip.textContent = `${data.user.name} (${data.user.role.toUpperCase()})`;
+          userInfoChip.hidden = false;
+        }
         if (adminPortalLink) {
           adminPortalLink.hidden = data.user.role !== "admin";
         }
+        if (signOutLink) {
+          signOutLink.hidden = false;
+        }
+      } else {
+        if (userInfoChip) userInfoChip.hidden = true;
+        if (adminPortalLink) adminPortalLink.hidden = true;
+        if (signOutLink) signOutLink.hidden = true;
       }
-      if (!initialProfileLoaded && data.user) {
+
+      if (!initialProfileLoaded) {
         initialProfileLoaded = true;
-        if (data.user.settings && Object.keys(data.user.settings).length > 0) {
+        if (data.user && data.user.settings && Object.keys(data.user.settings).length > 0) {
           applySavedSettings(data.user.settings);
           try {
             localStorage.setItem("pymr_station_settings", JSON.stringify(data.user.settings));

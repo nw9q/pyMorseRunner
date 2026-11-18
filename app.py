@@ -35,19 +35,42 @@ STATIC_DIR = (BASE_DIR / "static").resolve()
 DATA_DIR = (BASE_DIR / "data").resolve()
 SCORES_FILE = DATA_DIR / "scores.json"
 USERS_FILE = DATA_DIR / "users.json"
+VISITORS_FILE = DATA_DIR / "visitors.json"
 
 DATA_LOCK = threading.RLock()
 
 MAX_BODY_BYTES = 512 * 1024  # 512 KB max request payload
 MAX_SCORES_STORED = 500
+MAX_VISITORS_STORED = 1000
 MAX_QSOS_EXPORT = 5000
+MAX_CONTEST_DURATION_MIN = 60  # Hard limit: 60 minutes max contest run
 SESSION_TTL_SECONDS = 12 * 3600  # 12 hours
+VISITOR_COOKIE_TTL_SECONDS = 365 * 24 * 3600  # 1 year
 AUTH_STATE_TTL_SECONDS = 600  # 10 minutes for OAuth2 PKCE handshake
 MAX_PENDING_STATES = 512
 MAX_ACTIVE_SESSIONS = 2048
 
 # only allow ascii printables
 ASCII_PRINTABLE_RE = re.compile(r"^[\x20-\x7E]*$")
+
+
+def is_auth_required() -> bool:
+    """Return True if AUTH_REQUIRED=true forces login for the main simulator."""
+    return os.environ.get("AUTH_REQUIRED", "false").strip().lower() in ("1", "true", "yes", "on")
+
+
+def is_verbose_logging() -> bool:
+    """Return False when LOG_LEVEL=error to suppress informational console logs."""
+    return os.environ.get("LOG_LEVEL", "info").strip().lower() != "error"
+
+
+def log_info(msg: str) -> None:
+    if is_verbose_logging():
+        sys.stderr.write(f"[pyMorseRunner] INFO {msg}\n")
+
+
+def log_error(msg: str) -> None:
+    sys.stderr.write(f"[pyMorseRunner] ERROR {msg}\n")
 
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
@@ -442,8 +465,8 @@ def load_scores() -> list[dict[str, Any]]:
         return _load_scores_unlocked()
 
 
-def save_user_settings(user_sub: str, raw: dict[str, Any]) -> dict[str, Any]:
-    """Thread-safely sanitize and persist per-user station settings in users.json."""
+def sanitize_settings_dict(raw: dict[str, Any]) -> dict[str, Any]:
+    """Sanitize and clamp station settings + band conditions from untrusted JSON."""
     allowed_modes = {"rmSst", "rmCwt", "rmPileup", "rmSingle", "rmWpx", "rmHst"}
     mode_val = taint_check_ascii(raw.get("mode"), 16, "rmSst")
     if mode_val not in allowed_modes:
@@ -452,7 +475,7 @@ def save_user_settings(user_sub: str, raw: dict[str, Any]) -> dict[str, Any]:
     if qrn_model not in ("middleton", "ve3nea"):
         qrn_model = "middleton"
 
-    clean_settings: dict[str, Any] = {
+    return {
         "call": sanitize_call(raw.get("call"), "N9FZ"),
         "hamName": sanitize_field(raw.get("hamName"), 12) or "BOB",
         "mySpc": sanitize_field(raw.get("mySpc"), 6) or "IN",
@@ -463,7 +486,7 @@ def save_user_settings(user_sub: str, raw: dict[str, Any]) -> dict[str, Any]:
         "monVolumeDb": safe_int(raw.get("monVolumeDb"), -6, -30, 6),
         "qsk": bool(raw.get("qsk", True)),
         "activity": safe_int(raw.get("activity"), 3, 1, 9),
-        "duration": safe_int(raw.get("duration"), 30, 1, 120),
+        "duration": safe_int(raw.get("duration"), 30, 1, MAX_CONTEST_DURATION_MIN),
         "qrnModel": qrn_model,
         "qrn": bool(raw.get("qrn", True)),
         "qrm": bool(raw.get("qrm", True)),
@@ -473,6 +496,11 @@ def save_user_settings(user_sub: str, raw: dict[str, Any]) -> dict[str, Any]:
         "mode": mode_val,
     }
 
+
+def save_user_settings(user_sub: str, raw: dict[str, Any]) -> dict[str, Any]:
+    """Thread-safely sanitize and persist per-user station settings in users.json."""
+    clean_settings = sanitize_settings_dict(raw)
+
     with DATA_LOCK:
         users = _load_users_unlocked()
         if user_sub in users:
@@ -480,6 +508,101 @@ def save_user_settings(user_sub: str, raw: dict[str, Any]) -> dict[str, Any]:
             users[user_sub]["last_callsign"] = clean_settings["call"]
             _atomic_write_json(USERS_FILE, users)
     return clean_settings
+
+
+def _load_visitors_unlocked() -> dict[str, dict[str, Any]]:
+    ensure_data_dir()
+    if not VISITORS_FILE.is_file():
+        return {}
+    try:
+        raw = VISITORS_FILE.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def visitor_csrf_token(vid: str) -> str:
+    return hmac.new(SESSION_SECRET, f"csrf:{vid}".encode("ascii"), hashlib.sha256).hexdigest()
+
+
+def sign_visitor_id(vid: str) -> str:
+    sig = hmac.new(SESSION_SECRET, f"vid:{vid}".encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{vid}.{sig}"
+
+
+def verify_visitor_cookie(cookie_val: str) -> str | None:
+    if not cookie_val or "." not in cookie_val or not ASCII_PRINTABLE_RE.match(cookie_val):
+        return None
+    vid, sig = cookie_val.rsplit(".", 1)
+    if not re.match(r"^[A-Za-z0-9_-]{16,64}$", vid):
+        return None
+    expected = hmac.new(SESSION_SECRET, f"vid:{vid}".encode("ascii"), hashlib.sha256).hexdigest()
+    if hmac.compare_digest(sig, expected):
+        return vid
+    return None
+
+
+def record_visitor_activity(
+    vid: str,
+    client_ip: str,
+    country: str,
+    user_agent: str,
+    settings: dict[str, Any] | None = None,
+    score_entry: dict[str, Any] | None = None,
+) -> None:
+    """Record public visitor inputs, settings, and usage stats in visitors.json."""
+    now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    clean_ip = taint_check_ascii(client_ip, 64, "unknown")
+    clean_country = taint_check_ascii(country, 8, "")
+    clean_ua = taint_check_ascii(user_agent, 160, "unknown")
+
+    with DATA_LOCK:
+        visitors = _load_visitors_unlocked()
+        rec = visitors.get(vid)
+        if rec is None:
+            if len(visitors) >= MAX_VISITORS_STORED:
+                oldest_vid = min(visitors, key=lambda k: visitors[k].get("last_seen_utc", ""))
+                visitors.pop(oldest_vid, None)
+            rec = {
+                "vid": vid,
+                "ip": clean_ip,
+                "country": clean_country,
+                "ua": clean_ua,
+                "first_seen_utc": now_str,
+                "last_seen_utc": now_str,
+                "hits": 0,
+                "total_runs": 0,
+                "best_score": 0,
+                "settings": {},
+            }
+            visitors[vid] = rec
+
+        rec["ip"] = clean_ip
+        if clean_country:
+            rec["country"] = clean_country
+        rec["ua"] = clean_ua
+        rec["last_seen_utc"] = now_str
+        rec["hits"] = safe_int(rec.get("hits"), 0, 0, 10_000_000) + 1
+        if settings is not None:
+            rec["settings"] = settings
+        if score_entry is not None:
+            rec["total_runs"] = safe_int(rec.get("total_runs"), 0, 0, 1_000_000) + 1
+            rec["best_score"] = max(
+                safe_int(rec.get("best_score"), 0, 0, 100_000_000),
+                safe_int(score_entry.get("score"), 0, 0, 100_000_000),
+            )
+        _atomic_write_json(VISITORS_FILE, visitors)
+
+
+def admin_list_visitors() -> list[dict[str, Any]]:
+    with DATA_LOCK:
+        visitors = _load_visitors_unlocked()
+        out = [dict(v) for v in visitors.values()]
+        out.sort(key=lambda x: x.get("last_seen_utc", ""), reverse=True)
+        return out
 
 
 def save_score_entry(entry: dict[str, Any], user_sub: str) -> list[dict[str, Any]]:
@@ -526,13 +649,14 @@ def decode_id_token_payload(id_token: str) -> dict[str, Any]:
         return {}
 
 
-def build_auth0_authorize_url() -> str:
+def build_auth0_authorize_url(next_path: str = "/") -> str:
     """Create PKCE verifier/challenge and return the Auth0 /authorize redirect URL."""
     cfg = get_auth0_config()
     state = secrets.token_urlsafe(24)
     nonce = secrets.token_urlsafe(24)
     verifier = _b64url_encode(secrets.token_bytes(32))
     challenge = _b64url_encode(hashlib.sha256(verifier.encode("ascii")).digest())
+    safe_next = "/admin" if next_path == "/admin" else "/"
 
     now = time.time()
     with DATA_LOCK:
@@ -548,6 +672,7 @@ def build_auth0_authorize_url() -> str:
         PENDING_AUTH_STATES[state] = {
             "verifier": verifier,
             "nonce": nonce,
+            "next": safe_next,
             "created_at": now,
         }
 
@@ -566,12 +691,13 @@ def build_auth0_authorize_url() -> str:
     return f"https://{cfg['domain']}/authorize?{params}"
 
 
-def exchange_auth0_code(code: str, state: str) -> dict[str, Any]:
+def exchange_auth0_code(code: str, state: str) -> tuple[dict[str, Any], str]:
     """Exchange authorization code + PKCE verifier with Auth0 over HTTPS and fetch user claims."""
     with DATA_LOCK:
         st_info = PENDING_AUTH_STATES.pop(state, None)
     if not st_info or time.time() - st_info["created_at"] > AUTH_STATE_TTL_SECONDS:
         raise ValueError("Invalid or expired OAuth state parameter")
+    next_path = "/admin" if st_info.get("next") == "/admin" else "/"
 
     cfg = get_auth0_config()
     token_url = f"https://{cfg['domain']}/oauth/token"
@@ -636,7 +762,7 @@ def exchange_auth0_code(code: str, state: str) -> dict[str, Any]:
         except OSError:
             pass
 
-    return claims
+    return claims, next_path
 
 
 # Cabrillo & ADIF Contest Log Builders
@@ -774,8 +900,59 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
     sys_version = ""
     timeout = 5
 
+    def _get_client_ip(self) -> str:
+        """Extract real client IP behind Cloudflare Tunnel / reverse proxies."""
+        for hdr in ("CF-Connecting-IP", "True-Client-IP", "X-Real-IP"):
+            val = taint_check_ascii(self.headers.get(hdr, ""), 64, "")
+            if val:
+                return val
+        xff = taint_check_ascii(self.headers.get("X-Forwarded-For", ""), 256, "")
+        if xff:
+            first_ip = xff.split(",", 1)[0].strip()
+            if first_ip:
+                return first_ip[:64]
+        return self.client_address[0] if self.client_address else "unknown"
+
+    def _get_client_country(self) -> str:
+        return taint_check_ascii(self.headers.get("CF-IPCountry", ""), 8, "").upper()
+
     def log_message(self, fmt: str, *args: Any) -> None:
-        sys.stderr.write(f"[pyMorseRunner] {self.address_string()} - {fmt % args}\n")
+        msg = fmt % args
+        ip = self._get_client_ip()
+        # In HTTPStatus / BaseHTTPRequestHandler, args[1] is typically the status code
+        is_err = len(args) >= 2 and str(args[1]).startswith(("4", "5"))
+        if is_err:
+            log_error(f"{ip} - {msg}")
+        else:
+            log_info(f"{ip} - {msg}")
+
+    def _get_cookie(self, name: str) -> str:
+        raw_cookie = self.headers.get("Cookie", "")
+        if not raw_cookie:
+            return ""
+        c = http.cookies.SimpleCookie()
+        try:
+            c.load(raw_cookie)
+        except http.cookies.CookieError:
+            return ""
+        morsel = c.get(name)
+        return morsel.value if morsel else ""
+
+    def _get_session_cookie(self) -> str:
+        return self._get_cookie("pymr_session")
+
+    def _get_or_create_visitor(self) -> tuple[str, str | None]:
+        raw_vis = self._get_cookie("pymr_visitor")
+        vid = verify_visitor_cookie(raw_vis)
+        if vid:
+            return vid, None
+        new_vid = secrets.token_urlsafe(24)
+        signed = sign_visitor_id(new_vid)
+        cookie_hdr = (
+            f"pymr_visitor={signed}; Path=/; HttpOnly; SameSite=Lax; "
+            f"Max-Age={VISITOR_COOKIE_TTL_SECONDS}"
+        )
+        return new_vid, cookie_hdr
 
     def _add_security_headers(self) -> None:
         self.send_header(
@@ -791,18 +968,6 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
 
-    def _get_session_cookie(self) -> str:
-        raw_cookie = self.headers.get("Cookie", "")
-        if not raw_cookie:
-            return ""
-        c = http.cookies.SimpleCookie()
-        try:
-            c.load(raw_cookie)
-        except http.cookies.CookieError:
-            return ""
-        morsel = c.get("pymr_session")
-        return morsel.value if morsel else ""
-
     def _require_auth(self) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str]:
         cookie_val = self._get_session_cookie()
         return verify_session_cookie(cookie_val)
@@ -816,10 +981,14 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
 
-    def _send_json(self, payload: Any, status: int = HTTPStatus.OK) -> None:
+    def _send_json(
+        self, payload: Any, status: int = HTTPStatus.OK, set_cookie: str | None = None
+    ) -> None:
         raw = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self._add_security_headers()
+        if set_cookie:
+            self.send_header("Set-Cookie", set_cookie)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
@@ -917,9 +1086,10 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
 
         # 2. Public login assets (ONLY login page, login script, and stylesheet)
         if route == "/login":
+            next_target = "/admin" if query.get("next", [""])[0] == "/admin" else "/"
             user, _, status_reason = self._require_auth()
             if user and status_reason == "ok":
-                self._redirect("/")
+                self._redirect(next_target)
                 return
             self._serve_static_file("login.html")
             return
@@ -933,6 +1103,7 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
             self._send_json(
                 {
                     "configured": is_auth0_configured(),
+                    "authRequired": is_auth_required(),
                     "authenticated": bool(user and status_reason == "ok"),
                 }
             )
@@ -943,7 +1114,8 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
             if not is_auth0_configured():
                 self._redirect("/login?error=auth0_not_configured")
                 return
-            self._redirect(build_auth0_authorize_url())
+            next_target = "/admin" if query.get("next", [""])[0] == "/admin" else "/"
+            self._redirect(build_auth0_authorize_url(next_target))
             return
 
         # 4. Auth0 OAuth2 Callback
@@ -960,24 +1132,27 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
                 return
 
             try:
-                claims = exchange_auth0_code(code, state)
-                client_ip = self.client_address[0] if self.client_address else "unknown"
+                claims, next_path = exchange_auth0_code(code, state)
+                client_ip = self._get_client_ip()
                 ua = self.headers.get("User-Agent", "unknown")
                 user_rec, login_status = register_or_update_user_on_login(claims, client_ip, ua)
-            except Exception:
+            except Exception as exc:
+                log_error(f"Auth0 token exchange failed from {self._get_client_ip()}: {exc}")
                 self._redirect("/login?error=token_exchange_failed")
                 return
 
             if login_status == "blocked" or user_rec.get("blocked", False):
+                log_error(f"Blocked user login attempt: {user_rec.get('email', '')} ({self._get_client_ip()})")
                 self._redirect("/login?error=account_blocked")
                 return
 
+            log_info(f"Auth0 login: {user_rec.get('email', '')} role={user_rec.get('role')} ip={client_ip}")
             signed_cookie, _ = create_session(user_rec["sub"], client_ip, ua)
             cookie_hdr = (
                 f"pymr_session={signed_cookie}; Path=/; HttpOnly; SameSite=Lax; "
                 f"Max-Age={SESSION_TTL_SECONDS}"
             )
-            self._redirect("/", set_cookie=cookie_hdr)
+            self._redirect(next_path, set_cookie=cookie_hdr)
             return
 
         # 5. Logout
@@ -995,9 +1170,39 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
             self._redirect("/login?logged_out=1", set_cookie=clear_cookie)
             return
 
-        # ALL ROUTES BELOW REQUIRE AN ACTIVE, UNBLOCKED AUTH0 SESSION
+        # Check optional or required Auth0 session
         user, sess, auth_reason = self._require_auth()
-        if not user or not sess or auth_reason != "ok":
+        is_authed = bool(user and sess and auth_reason == "ok")
+
+        # Admin-only routes ALWAYS require an authenticated admin session
+        if route in ("/admin", "/api/admin/users"):
+            if not is_authed:
+                if route.startswith("/api/"):
+                    self._send_json({"error": "Authentication required", "reason": auth_reason}, HTTPStatus.UNAUTHORIZED)
+                else:
+                    err_q = "&error=account_blocked" if auth_reason == "blocked" else ""
+                    self._redirect(f"/login?next=/admin{err_q}")
+                return
+            if user.get("role") != "admin":
+                if route.startswith("/api/"):
+                    self._send_json({"error": "Admin privileges required"}, HTTPStatus.FORBIDDEN)
+                else:
+                    self._redirect("/")
+                return
+            if route == "/admin":
+                self._serve_static_file("admin.html")
+            else:
+                self._send_json(
+                    {
+                        "users": admin_List_users(),
+                        "visitors": admin_list_visitors(),
+                        "selfSub": user["sub"],
+                    }
+                )
+            return
+
+        # If AUTH_REQUIRED=true, enforce login on all remaining routes
+        if is_auth_required() and not is_authed:
             if route.startswith("/api/"):
                 self._send_json({"error": "Authentication required", "reason": auth_reason}, HTTPStatus.UNAUTHORIZED)
             else:
@@ -1005,24 +1210,43 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
                 self._redirect(f"/login{err_q}")
             return
 
-        # Authenticated API routes
+        # Simulator /api/me (works both publicly and when signed in)
         if route == "/api/me":
+            if is_authed and user and sess:
+                self._send_json(
+                    {
+                        "authenticated": True,
+                        "authRequired": is_auth_required(),
+                        "user": {
+                            "sub": user["sub"],
+                            "name": user["name"],
+                            "nickname": user.get("nickname", ""),
+                            "email": user["email"],
+                            "role": user["role"],
+                            "picture": user.get("picture", ""),
+                            "provider": user.get("provider", "auth0"),
+                            "login_count": user.get("login_count", 1),
+                            "last_callsign": user.get("last_callsign", "N0CALL"),
+                            "settings": user.get("settings", {}),
+                        },
+                        "csrfToken": sess["csrf"],
+                    }
+                )
+                return
+
+            vid, new_vis_cookie = self._get_or_create_visitor()
+            client_ip = self._get_client_ip()
+            country = self._get_client_country()
+            ua = self.headers.get("User-Agent", "unknown")
+            record_visitor_activity(vid, client_ip, country, ua)
             self._send_json(
                 {
-                    "user": {
-                        "sub": user["sub"],
-                        "name": user["name"],
-                        "nickname": user.get("nickname", ""),
-                        "email": user["email"],
-                        "role": user["role"],
-                        "picture": user.get("picture", ""),
-                        "provider": user.get("provider", "auth0"),
-                        "login_count": user.get("login_count", 1),
-                        "last_callsign": user.get("last_callsign", "N0CALL"),
-                        "settings": user.get("settings", {}),
-                    },
-                    "csrfToken": sess["csrf"],
-                }
+                    "authenticated": False,
+                    "authRequired": is_auth_required(),
+                    "user": None,
+                    "csrfToken": visitor_csrf_token(vid),
+                },
+                set_cookie=new_vis_cookie,
             )
             return
 
@@ -1030,22 +1254,7 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
             self._send_json({"scores": load_scores()})
             return
 
-        # Admin-only routes
-        if route == "/admin":
-            if user.get("role") != "admin":
-                self._redirect("/")
-                return
-            self._serve_static_file("admin.html")
-            return
-
-        if route == "/api/admin/users":
-            if user.get("role") != "admin":
-                self._send_json({"error": "Admin privileges required"}, HTTPStatus.FORBIDDEN)
-                return
-            self._send_json({"users": admin_List_users(), "selfSub": user["sub"]})
-            return
-
-        # Protected static files (resolve path BEFORE checking admin asset names)
+        # Static files (always block admin.html / admin.js for non-admins)
         rel_path = "index.html" if route in ("", "/") else route.lstrip("/")
         if rel_path.startswith("static/"):
             rel_path = rel_path[len("static/") :]
@@ -1053,7 +1262,7 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
         if not candidate.is_relative_to(STATIC_DIR) or not candidate.is_file():
             self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
             return
-        if candidate.name in ("admin.html", "admin.js") and user.get("role") != "admin":
+        if candidate.name in ("admin.html", "admin.js") and (not is_authed or not user or user.get("role") != "admin"):
             self._send_json({"error": "Forbidden"}, HTTPStatus.FORBIDDEN)
             return
         self._serve_static_file(candidate.name)
@@ -1063,15 +1272,58 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
         route = parsed.path
 
         user, sess, auth_reason = self._require_auth()
-        if not user or not sess or auth_reason != "ok":
+        is_authed = bool(user and sess and auth_reason == "ok")
+
+        # Admin actions always require Auth0 admin session
+        if route == "/api/admin/users/action":
+            if not is_authed or not user or not sess:
+                self._send_json({"error": "Authentication required", "reason": auth_reason}, HTTPStatus.UNAUTHORIZED)
+                return
+            if user.get("role") != "admin":
+                self._send_json({"error": "Admin privileges required"}, HTTPStatus.FORBIDDEN)
+                return
+            csrf_hdr = taint_check_ascii(self.headers.get("X-CSRF-Token", ""), 128, "")
+            if not csrf_hdr or not hmac.compare_digest(csrf_hdr, sess["csrf"]):
+                self._send_json({"error": "Invalid or missing CSRF token"}, HTTPStatus.FORBIDDEN)
+                return
+            body = self._read_json_body()
+            if body is None:
+                self._send_json({"error": "Invalid JSON payload"}, HTTPStatus.BAD_REQUEST)
+                return
+            target_sub = sanitize_user_id(body.get("sub"))
+            action = sanitize_field(body.get("action"), 16).lower()
+            if not target_sub or action not in ("block", "unblock", "kick", "promote"):
+                self._send_json({"error": "Invalid target user or action"}, HTTPStatus.BAD_REQUEST)
+                return
+            ok, message = admin_mutate_user(user["sub"], target_sub, action)
+            status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
+            self._send_json(
+                {
+                    "ok": ok,
+                    "message": message,
+                    "users": admin_List_users(),
+                    "visitors": admin_list_visitors(),
+                },
+                status,
+            )
+            return
+
+        if is_auth_required() and not is_authed:
             self._send_json({"error": "Authentication required", "reason": auth_reason}, HTTPStatus.UNAUTHORIZED)
             return
 
-        # Verify CSRF token header on all authenticated POST requests
+        # Verify CSRF token (against Auth0 session if signed in, or signed visitor cookie if public)
         csrf_hdr = taint_check_ascii(self.headers.get("X-CSRF-Token", ""), 128, "")
-        if not csrf_hdr or not hmac.compare_digest(csrf_hdr, sess["csrf"]):
-            self._send_json({"error": "Invalid or missing CSRF token"}, HTTPStatus.FORBIDDEN)
-            return
+        vid: str | None = None
+        if is_authed and sess:
+            if not csrf_hdr or not hmac.compare_digest(csrf_hdr, sess["csrf"]):
+                self._send_json({"error": "Invalid or missing CSRF token"}, HTTPStatus.FORBIDDEN)
+                return
+        else:
+            vid = verify_visitor_cookie(self._get_cookie("pymr_visitor"))
+            if not vid or not csrf_hdr or not hmac.compare_digest(csrf_hdr, visitor_csrf_token(vid)):
+                self._send_json({"error": "Invalid or missing visitor CSRF token"}, HTTPStatus.FORBIDDEN)
+                return
 
         body = self._read_json_body()
         if body is None:
@@ -1081,25 +1333,55 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
             )
             return
 
+        client_ip = self._get_client_ip()
+        country = self._get_client_country()
+        ua = self.headers.get("User-Agent", "unknown")
+
         if route == "/api/settings":
-            saved = save_user_settings(user["sub"], body)
-            self._send_json({"ok": True, "settings": saved})
+            clean_settings = sanitize_settings_dict(body)
+            if is_authed and user:
+                save_user_settings(user["sub"], clean_settings)
+                who = user.get("email", user["sub"])
+            else:
+                if vid:
+                    record_visitor_activity(vid, client_ip, country, ua, settings=clean_settings)
+                who = "public"
+            log_info(
+                f"Settings [{who}] ip={client_ip} ({country or '-'}) "
+                f"call={clean_settings['call']} name={clean_settings['hamName']} spc={clean_settings['mySpc']} "
+                f"mode={clean_settings['mode']} wpm={clean_settings['wpm']} act={clean_settings['activity']} "
+                f"dur={clean_settings['duration']}m qrn={clean_settings['qrn']}({clean_settings['qrnModel']}) "
+                f"qrm={clean_settings['qrm']} qsb={clean_settings['qsb']} flt={clean_settings['flutter']} "
+                f"lids={clean_settings['lids']} qsk={clean_settings['qsk']}"
+            )
+            self._send_json({"ok": True, "settings": clean_settings})
             return
 
         if route == "/api/scores":
+            call_str = sanitize_call(body.get("call"), "N9FZ")
             entry = {
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-                "user": user["name"],
-                "call": sanitize_call(body.get("call"), "VE3NEA"),
+                "user": user["name"] if (is_authed and user) else call_str,
+                "call": call_str,
                 "mode": sanitize_field(body.get("mode"), 16) or "SST",
-                "wpm": safe_int(body.get("wpm"), 20, 5, 120),
+                "wpm": safe_int(body.get("wpm"), 20, 5, 80),
                 "rawQsos": safe_int(body.get("rawQsos"), 0, 0, 10000),
                 "validQsos": safe_int(body.get("validQsos"), 0, 0, 10000),
                 "mults": safe_int(body.get("mults"), 0, 0, 5000),
                 "score": safe_int(body.get("score"), 0, 0, 100_000_000),
                 "crc": sanitize_field(body.get("crc"), 16),
             }
-            scores = save_score_entry(entry, user["sub"])
+            if is_authed and user:
+                scores = save_score_entry(entry, user["sub"])
+            else:
+                scores = save_score_entry(entry, "")
+                if vid:
+                    record_visitor_activity(vid, client_ip, country, ua, score_entry=entry)
+            log_info(
+                f"Run completed ip={client_ip} ({country or '-'}) call={entry['call']} "
+                f"mode={entry['mode']} wpm={entry['wpm']} qsos={entry['validQsos']}/{entry['rawQsos']} "
+                f"mults={entry['mults']} score={entry['score']}"
+            )
             self._send_json({"ok": True, "scores": scores}, HTTPStatus.CREATED)
             return
 
@@ -1115,23 +1397,6 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
             call = sanitize_call(body.get("myCall"), "VE3NEA")
             mode = sanitize_field(body.get("mode"), 12) or "SST"
             self._send_text_download(adif, f"{call}_{mode}.adi")
-            return
-
-        if route == "/api/admin/users/action":
-            if user.get("role") != "admin":
-                self._send_json({"error": "Admin privileges required"}, HTTPStatus.FORBIDDEN)
-                return
-            target_sub = sanitize_user_id(body.get("sub"))
-            action = sanitize_field(body.get("action"), 16).lower()
-            if not target_sub or action not in ("block", "unblock", "kick", "promote"):
-                self._send_json({"error": "Invalid target user or action"}, HTTPStatus.BAD_REQUEST)
-                return
-            ok, message = admin_mutate_user(user["sub"], target_sub, action)
-            status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
-            self._send_json(
-                {"ok": ok, "message": message, "users": admin_List_users()},
-                status,
-            )
             return
 
         self._send_json({"error": "Unknown endpoint"}, HTTPStatus.NOT_FOUND)

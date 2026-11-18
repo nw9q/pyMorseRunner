@@ -6,14 +6,16 @@
 
 (() => {
   const adminUsersBody = document.getElementById("adminUsersBody");
+  const adminVisitorsBody = document.getElementById("adminVisitorsBody");
   const adminBanner = document.getElementById("adminBanner");
   const adminSelfBadge = document.getElementById("adminSelfBadge");
   const refreshUsersBtn = document.getElementById("refreshUsersBtn");
   const lastUpdatedLabel = document.getElementById("lastUpdatedLabel");
+  const visitorsUpdatedLabel = document.getElementById("visitorsUpdatedLabel");
 
+  const statTotalVisitors = document.getElementById("statTotalVisitors");
   const statTotalUsers = document.getElementById("statTotalUsers");
   const statActiveSessions = document.getElementById("statActiveSessions");
-  const statAdmins = document.getElementById("statAdmins");
   const statBlocked = document.getElementById("statBlocked");
 
   let csrfToken = "";
@@ -59,8 +61,11 @@
     }
     const data = await resp.json();
     if (data.selfSub) selfSub = data.selfSub;
+    renderVisitors(data.visitors || []);
     renderUsers(data.users || []);
-    lastUpdatedLabel.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    const nowText = `Updated ${new Date().toLocaleTimeString()}`;
+    lastUpdatedLabel.textContent = nowText;
+    if (visitorsUpdatedLabel) visitorsUpdatedLabel.textContent = nowText;
   }
 
   function createMetaLine(label, value) {
@@ -73,6 +78,78 @@
     spanVal.textContent = value;
     div.append(spanLbl, spanVal);
     return div;
+  }
+
+  function renderVisitors(visitors) {
+    if (!adminVisitorsBody) return;
+    adminVisitorsBody.textContent = "";
+    if (statTotalVisitors) {
+      statTotalVisitors.textContent = String(visitors.length);
+    }
+
+    for (const v of visitors) {
+      const s = v.settings || {};
+      const tr = document.createElement("tr");
+
+      // 1. Client IP & Country
+      const tdIp = document.createElement("td");
+      const ipStrong = document.createElement("strong");
+      ipStrong.textContent = v.ip || "unknown";
+      tdIp.appendChild(ipStrong);
+      if (v.country) {
+        const cBadge = document.createElement("span");
+        cBadge.className = "badge-pill badge-accent";
+        cBadge.textContent = v.country;
+        tdIp.appendChild(cBadge);
+      }
+      tdIp.appendChild(createMetaLine("UA", (v.ua || "unknown").slice(0, 56)));
+
+      // 2. Station Inputs
+      const tdStation = document.createElement("td");
+      tdStation.appendChild(createMetaLine("Callsign", s.call || "-"));
+      tdStation.appendChild(createMetaLine("Name", s.hamName || "-"));
+      tdStation.appendChild(createMetaLine("SPC / CWT", `${s.mySpc || "-"} / ${s.myCwt || "-"}`));
+
+      // 3. Mode & Speed
+      const tdMode = document.createElement("td");
+      tdMode.appendChild(createMetaLine("Mode", s.mode || "-"));
+      tdMode.appendChild(
+        createMetaLine(
+          "Speed / Pitch / BW",
+          `${s.wpm || "-"} WPM / ${s.pitch || "-"} Hz / ${s.bandWidth || "-"} Hz`
+        )
+      );
+      tdMode.appendChild(
+        createMetaLine("QSK / Dur", `${s.qsk ? "Full QSK" : "Semi"} / ${s.duration || "-"}m`)
+      );
+
+      // 4. Band Conditions
+      const tdBand = document.createElement("td");
+      tdBand.appendChild(createMetaLine("Activity", String(s.activity ?? "-")));
+      tdBand.appendChild(
+        createMetaLine("QRN", `${s.qrn ? "ON" : "OFF"} (${s.qrnModel || "-"})`)
+      );
+      tdBand.appendChild(
+        createMetaLine(
+          "Flags",
+          `QRM:${s.qrm ? "Y" : "N"} QSB:${s.qsb ? "Y" : "N"} FLT:${s.flutter ? "Y" : "N"} LID:${s.lids ? "Y" : "N"}`
+        )
+      );
+
+      // 5. Usage Stats
+      const tdStats = document.createElement("td");
+      tdStats.appendChild(createMetaLine("Hits", String(v.hits || 0)));
+      tdStats.appendChild(createMetaLine("Runs", String(v.total_runs || 0)));
+      tdStats.appendChild(createMetaLine("Best Score", String(v.best_score || 0)));
+
+      // 6. Timestamps
+      const tdTime = document.createElement("td");
+      tdTime.appendChild(createMetaLine("First", v.first_seen_utc || "-"));
+      tdTime.appendChild(createMetaLine("Last", v.last_seen_utc || "-"));
+
+      tr.append(tdIp, tdStation, tdMode, tdBand, tdStats, tdTime);
+      adminVisitorsBody.appendChild(tr);
+    }
   }
 
   function renderUsers(users) {
@@ -190,7 +267,6 @@
 
     statTotalUsers.textContent = String(users.length);
     statActiveSessions.textContent = String(activeSessTotal);
-    statAdmins.textContent = String(adminCount);
     statBlocked.textContent = String(blockedCount);
   }
 

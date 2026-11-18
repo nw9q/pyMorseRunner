@@ -30,20 +30,43 @@
 
     <section class="admin-stats-grid" aria-label="System Summary">
       <div class="panel stat-card">
-        <span class="stat-label">Total Operators</span>
+        <span class="stat-label">Public Visitors</span>
+        <strong id="statTotalVisitors" class="stat-value">0</strong>
+      </div>
+      <div class="panel stat-card">
+        <span class="stat-label">Registered Operators</span>
         <strong id="statTotalUsers" class="stat-value">0</strong>
       </div>
       <div class="panel stat-card">
-        <span class="stat-label">Active Sessions</span>
+        <span class="stat-label">Active Auth0 Sessions</span>
         <strong id="statActiveSessions" class="stat-value">0</strong>
-      </div>
-      <div class="panel stat-card">
-        <span class="stat-label">Administrators</span>
-        <strong id="statAdmins" class="stat-value">0</strong>
       </div>
       <div class="panel stat-card">
         <span class="stat-label">Blocked Accounts</span>
         <strong id="statBlocked" class="stat-value">0</strong>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <span>Public Simulator Usage &amp; Visitor Telemetry (CF-Connecting-IP / X-Forwarded-For)</span>
+        <span id="visitorsUpdatedLabel">Live</span>
+      </div>
+
+      <div class="admin-table-wrap">
+        <table class="log-table admin-table" aria-label="Public Visitor Telemetry">
+          <thead>
+            <tr>
+              <th>Client IP &amp; Country</th>
+              <th>Station Inputs (Call / Name / SPC)</th>
+              <th>Mode &amp; Speed</th>
+              <th>Band Conditions</th>
+              <th>Usage Stats</th>
+              <th>Timestamps (UTC)</th>
+            </tr>
+          </thead>
+          <tbody id="adminVisitorsBody"></tbody>
+        </table>
       </div>
     </section>
 

@@ -29,6 +29,9 @@
   }
 
   const params = new URLSearchParams(window.location.search);
+  if (params.get("next") === "/admin" && loginBtn) {
+    loginBtn.href = "/auth/login?next=/admin";
+  }
   const rawErrKey = params.get("error");
   if (rawErrKey) {
     const errKey = rawErrKey.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);

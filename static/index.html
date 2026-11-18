@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
   <title>pyMorseRunner — CW &amp; K1USN SST Contest Simulator</title>
-  <link rel="stylesheet" href="/static/style.css?v=20261117d">
+  <link rel="stylesheet" href="/static/style.css?v=20261117e">
 </head>
 <body>
   <header class="app-header">
@@ -32,9 +32,9 @@
       <button id="exportCabrilloBtn" type="button" class="btn" title="Download Cabrillo .log file">Export Cabrillo</button>
       <button id="exportAdifBtn" type="button" class="btn" title="Download ADIF .adi file for Mac loggers">Export ADIF</button>
       <button id="downloadWavBtn" type="button" class="btn" title="Download recorded session audio as WAV" disabled>Save WAV</button>
-      <span id="userInfoChip" class="user-chip" title="Authenticated Operator">Operator</span>
+      <span id="userInfoChip" class="user-chip" title="Authenticated Operator" hidden>Operator</span>
       <a id="adminPortalLink" href="/admin" class="btn" hidden>Admin</a>
-      <a href="/auth/logout" class="btn" title="Sign Out">Sign Out</a>
+      <a id="signOutLink" href="/auth/logout" class="btn" title="Sign Out" hidden>Sign Out</a>
     </div>
   </header>
 
@@ -213,8 +213,8 @@
             <input id="activityInput" type="number" min="1" max="9" value="3">
           </div>
           <div class="setting-item">
-            <label for="durationInput">Duration (Min)</label>
-            <input id="durationInput" type="number" min="1" max="120" value="30">
+            <label for="durationInput">Duration (Max 60m)</label>
+            <input id="durationInput" type="number" min="1" max="60" value="30">
           </div>
           <div class="setting-item full-width">
             <label for="qrnModelSelect">QRN Static Model</label>
@@ -222,10 +222,6 @@
               <option value="middleton" selected>Middleton Class B (Sferics)</option>
               <option value="ve3nea">Classic VE3NEA</option>
             </select>
-          </div>
-          <div class="setting-item full-width">
-            <label for="callHistoryFile">Custom Call History (.txt / .csv / .dta)</label>
-            <input id="callHistoryFile" type="file" accept=".txt,.csv,.dta">
           </div>
         </div>
         <div class="checkbox-grid">
@@ -284,8 +280,8 @@
     <span><kbd>PgUp</kbd> / <kbd>PgDn</kbd> Speed WPM</span>
   </footer>
 
-  <script src="/static/dsp.js?v=20261117d"></script>
-  <script src="/static/contest.js?v=20261117d"></script>
-  <script src="/static/ui.js?v=20261117d"></script>
+  <script src="/static/dsp.js?v=20261117e"></script>
+  <script src="/static/contest.js?v=20261117e"></script>
+  <script src="/static/ui.js?v=20261117e"></script>
 </body>
 </html>
