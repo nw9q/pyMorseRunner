@@ -860,7 +860,9 @@ class MorseRunnerHandler(BaseHTTPRequestHandler):
         self._add_security_headers()
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("CDN-Cache-Control", "no-store")
+        self.send_header("Cloudflare-CDN-Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
 

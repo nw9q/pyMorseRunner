@@ -606,31 +606,39 @@ const ContestEngine = (() => {
     getWpm() {
       const ini = this.contest.ini;
       if (ini.runMode === "rmHst") return ini.wpm;
-      if (ini.runMode === "rmSst") {
-        // K1USN SST speed distribution:
-        //  - ~72% match near the upper side of your CQ speed (e.g. 8-12 WPM at 10 WPM, ~14-16 WPM at 15 WPM, 18-20 WPM at 20 WPM)
-        //  - ~18% newer CW operators calling slower (down to 5-10 WPM)
-        //  - ~10% 30-WPM pros trying to throttle down (outlier +3 to +5 WPM above your speed, capped around ~20-22 WPM)
+      if (ini.runMode === "rmSst" || ini.wpm <= 20) {
+        // K1USN SST / Slow-Speed distribution:
+        //  - ~80% call on the upper side of your CQ speed (e.g. 14-16 WPM when running at 14 WPM, 18-20 WPM at 20 WPM)
+        //  - ~10% fast contester outliers trying to throttle down (+2 to +4 WPM above you, capped at 20-22 WPM)
+        //  - ~7% slightly slower ops (1 to 3 WPM below your speed, e.g. 11-13 WPM at 14 WPM)
+        //  - ~3% rare beginner outlier (8-10 WPM)
         const myWpm = Math.max(5, Math.min(20, ini.wpm));
         const roll = Math.random();
-        if (roll < 0.72) {
-          // Main cluster around operator's speed (skewed slightly toward upper side of myWpm)
-          const lo = Math.max(5, myWpm - 2);
+        if (roll < 0.80) {
+          // Main cluster on the upper side of operator's speed (myWpm to myWpm + 2, capped at 20 WPM)
+          const lo = myWpm >= 19 ? 18 : myWpm;
           const hi = Math.min(20, myWpm + 2);
-          return Math.round(lo + Math.pow(Math.random(), 0.75) * (hi - lo));
+          return Math.round(lo + Math.random() * Math.max(0, hi - lo));
         } else if (roll < 0.90) {
-          // Slower / new CW operator (5 WPM up to myWpm - 3)
-          const slowHi = Math.max(5, myWpm - 3);
-          return Math.round(5 + Math.random() * Math.max(0, slowHi - 5));
-        } else {
-          // Fast contester trying to slow down (~4-5 WPM faster than you, or ~20-22 WPM cap)
+          // Fast contester trying to slow down (+2 to +4 WPM above you, or 20-22 WPM cap)
           const fastCap = ini.lids ? 22 : 20;
-          const fastLo = Math.min(fastCap, myWpm + 3);
-          const fastHi = Math.min(fastCap, myWpm + 5);
+          const fastLo = Math.min(fastCap, myWpm + 2);
+          const fastHi = Math.min(fastCap, myWpm + 4);
           return Math.round(fastLo + Math.random() * Math.max(0, fastHi - fastLo));
+        } else if (roll < 0.97) {
+          // Slightly slower caller (myWpm - 3 to myWpm - 1)
+          const medLo = Math.max(6, myWpm - 3);
+          const medHi = Math.max(medLo, myWpm - 1);
+          return Math.round(medLo + Math.random() * (medHi - medLo));
+        } else {
+          // Rare slower newcomer (~3% of callers: 8 WPM up to myWpm - 4)
+          const slowLo = Math.min(8, Math.max(5, myWpm - 6));
+          const slowHi = Math.max(slowLo, myWpm - 4);
+          return Math.round(slowLo + Math.random() * (slowHi - slowLo));
         }
       }
-      return Math.round(ini.wpm * 0.5 * (1 + Math.random()));
+      // High-speed modes (>20 WPM): cluster between 82% and 105% of runner's speed
+      return Math.round(ini.wpm * (0.82 + 0.23 * Math.random()));
     }
 
     getNR() {
