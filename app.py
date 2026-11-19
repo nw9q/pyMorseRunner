@@ -493,6 +493,7 @@ def sanitize_settings_dict(raw: dict[str, Any]) -> dict[str, Any]:
         "qsb": bool(raw.get("qsb", True)),
         "flutter": bool(raw.get("flutter", True)),
         "lids": bool(raw.get("lids", True)),
+        "sigSpread": bool(raw.get("sigSpread", True)),
         "mode": mode_val,
     }
 

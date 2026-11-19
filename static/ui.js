@@ -81,6 +81,7 @@
   const qsbCheck = document.getElementById("qsbCheck");
   const flutterCheck = document.getElementById("flutterCheck");
   const lidsCheck = document.getElementById("lidsCheck");
+  const sigSpreadCheck = document.getElementById("sigSpreadCheck");
 
   const rawPtsCell = document.getElementById("rawPtsCell");
   const valPtsCell = document.getElementById("valPtsCell");
@@ -282,6 +283,7 @@
     contest.ini.qsb = qsbCheck.checked;
     contest.ini.flutter = flutterCheck.checked;
     contest.ini.lids = lidsCheck.checked;
+    contest.ini.sigSpread = sigSpreadCheck ? sigSpreadCheck.checked : true;
     contest.me.myCall = contest.ini.call;
     contest.me.opName = contest.ini.hamName;
     contest.me.spc = contest.ini.mySpc;
@@ -312,6 +314,7 @@
       qsb: qsbCheck.checked,
       flutter: flutterCheck.checked,
       lids: lidsCheck.checked,
+      sigSpread: sigSpreadCheck ? sigSpreadCheck.checked : true,
       mode: runModeSelect.value || "rmSst",
     };
   }
@@ -375,6 +378,7 @@
     if (typeof s.qsb === "boolean") qsbCheck.checked = s.qsb;
     if (typeof s.flutter === "boolean") flutterCheck.checked = s.flutter;
     if (typeof s.lids === "boolean") lidsCheck.checked = s.lids;
+    if (typeof s.sigSpread === "boolean" && sigSpreadCheck) sigSpreadCheck.checked = s.sigSpread;
 
     syncModeLabels();
     contest.ini.call = myCallInput.value;
@@ -394,6 +398,7 @@
     contest.ini.qsb = qsbCheck.checked;
     contest.ini.flutter = flutterCheck.checked;
     contest.ini.lids = lidsCheck.checked;
+    contest.ini.sigSpread = sigSpreadCheck ? sigSpreadCheck.checked : true;
   }
 
   function startContest() {
@@ -958,8 +963,8 @@
     persistSettings();
   });
 
-  [qrnCheck, qrmCheck, qsbCheck, flutterCheck, lidsCheck].forEach((chk) => {
-    chk.addEventListener("change", syncSettingsFromInputs);
+  [qrnCheck, qrmCheck, qsbCheck, flutterCheck, lidsCheck, sigSpreadCheck].forEach((chk) => {
+    if (chk) chk.addEventListener("change", syncSettingsFromInputs);
   });
 
   // ---------------------------------------------------------------------------

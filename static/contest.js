@@ -943,7 +943,19 @@ const ContestEngine = (() => {
       const initialBw =
         contest.ini.flutter && this.isFlutterStation ? this.flutterQsbBw : this.slowQsbBw;
       this.qsb = new Qsb(initialBw, contest.ini.bufSize);
-      this.amplitude = 9000 + 18000 * (1 + rndUShaped());
+      this.uniformAmplitude = 9000 + 18000 * (1 + rndUShaped());
+      const sigRoll = Math.random();
+      if (sigRoll < 0.25) {
+        // Weak QRP / DX station (S3-S5)
+        this.spreadAmplitude = 2500 + Math.random() * 4000;
+      } else if (sigRoll < 0.75) {
+        // Average contest signal (S7-S9)
+        this.spreadAmplitude = 10000 + Math.random() * 22000;
+      } else {
+        // Big gun / strong signal (S9+10 to S9+20)
+        this.spreadAmplitude = 45000 + Math.random() * 50000;
+      }
+      this.amplitude = contest.ini.sigSpread ? this.spreadAmplitude : this.uniformAmplitude;
       this.pitch = Math.round(rndGaussLim(0, 300));
       this.timeOut = NEVER;
       this.state = ST.Copying;
@@ -956,6 +968,7 @@ const ContestEngine = (() => {
       if (Math.abs(this.qsb.bandwidth - targetBw) > 0.01) {
         this.qsb.setBandwidth(targetBw);
       }
+      this.amplitude = this.contest.ini.sigSpread ? this.spreadAmplitude : this.uniformAmplitude;
       this.nrWithError = this.contest.ini.lids && Math.random() < 0.28;
     }
 
@@ -1169,6 +1182,7 @@ const ContestEngine = (() => {
         qsb: true,
         flutter: true,
         lids: true,
+        sigSpread: true,
         duration: 30,
         runMode: "rmStop",
         monVolumeDb: -6,
@@ -1353,14 +1367,18 @@ const ContestEngine = (() => {
 
     onMeStartedSending() {
       // In Full Break-In (QSK) mode, occasionally spawn a tail-ending caller during CQ/TU
-      // so the operator can hear stations breaking in between dits and dahs
+      // so the operator can hear stations breaking in between dits and dahs (respecting Activity)
       const mode = this.ini.runMode;
+      const activeDx = this.dxCount();
+      const maxPileup = Math.max(1, Math.round(this.ini.activity * 1.25));
       if (
         this.ini.qsk &&
         mode !== "rmSingle" &&
         mode !== "rmHst" &&
+        activeDx < this.ini.activity &&
+        activeDx < maxPileup &&
         (this.me.msg.has("msgCQ") || this.me.msg.has("msgTU")) &&
-        Math.random() < 0.35
+        Math.random() < Math.min(0.35, 0.12 * this.ini.activity)
       ) {
         const earlyCaller = new DxStation(this);
         earlyCaller.oper.setState(OS.NeedQso);
@@ -1383,7 +1401,9 @@ const ContestEngine = (() => {
           this.me.msg.has("msgTU") &&
           this.me.msg.has("msgMyCall");
         if (sentCq || sentTuAndMy) {
-          const callersToSpawn = rndPoisson(this.ini.activity / 2.0);
+          const maxPileup = Math.max(1, Math.round(this.ini.activity * 1.25));
+          const room = Math.max(0, maxPileup - this.dxCount());
+          const callersToSpawn = Math.min(room, rndPoisson(this.ini.activity / 2.0));
           for (let i = 0; i < callersToSpawn; i++) {
             this.stations.push(new DxStation(this));
           }
