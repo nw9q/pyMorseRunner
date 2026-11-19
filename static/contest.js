@@ -944,17 +944,10 @@ const ContestEngine = (() => {
         contest.ini.flutter && this.isFlutterStation ? this.flutterQsbBw : this.slowQsbBw;
       this.qsb = new Qsb(initialBw, contest.ini.bufSize);
       this.uniformAmplitude = 9000 + 18000 * (1 + rndUShaped());
-      const sigRoll = Math.random();
-      if (sigRoll < 0.25) {
-        // Weak QRP / DX station (S3-S5)
-        this.spreadAmplitude = 2500 + Math.random() * 4000;
-      } else if (sigRoll < 0.75) {
-        // Average contest signal (S7-S9)
-        this.spreadAmplitude = 10000 + Math.random() * 22000;
-      } else {
-        // Big gun / strong signal (S9+10 to S9+20)
-        this.spreadAmplitude = 45000 + Math.random() * 50000;
-      }
+      // Log-normal (Gaussian in dB) bell curve around a solid S8 station (18,000):
+      // sigma = 6.5 dB, clamped to +/-13 dB (~4,030 weak QRP to ~80,400 big-gun kW)
+      const dbOffset = rndGaussLim(0, 13);
+      this.spreadAmplitude = 18000 * Math.pow(10, dbOffset / 20);
       this.amplitude = contest.ini.sigSpread ? this.spreadAmplitude : this.uniformAmplitude;
       this.pitch = Math.round(rndGaussLim(0, 300));
       this.timeOut = NEVER;
@@ -1367,16 +1360,13 @@ const ContestEngine = (() => {
 
     onMeStartedSending() {
       // In Full Break-In (QSK) mode, occasionally spawn a tail-ending caller during CQ/TU
-      // so the operator can hear stations breaking in between dits and dahs (respecting Activity)
+      // so the operator can hear stations breaking in between dits and dahs
       const mode = this.ini.runMode;
-      const activeDx = this.dxCount();
-      const maxPileup = Math.max(1, Math.round(this.ini.activity * 1.25));
       if (
         this.ini.qsk &&
         mode !== "rmSingle" &&
         mode !== "rmHst" &&
-        activeDx < this.ini.activity &&
-        activeDx < maxPileup &&
+        this.dxCount() < this.ini.activity &&
         (this.me.msg.has("msgCQ") || this.me.msg.has("msgTU")) &&
         Math.random() < Math.min(0.35, 0.12 * this.ini.activity)
       ) {
@@ -1401,9 +1391,8 @@ const ContestEngine = (() => {
           this.me.msg.has("msgTU") &&
           this.me.msg.has("msgMyCall");
         if (sentCq || sentTuAndMy) {
-          const maxPileup = Math.max(1, Math.round(this.ini.activity * 1.25));
-          const room = Math.max(0, maxPileup - this.dxCount());
-          const callersToSpawn = Math.min(room, rndPoisson(this.ini.activity / 2.0));
+          // Original VE3NEA Contest.pas behavior: Poisson(Activity / 2) new callers per CQ/TU
+          const callersToSpawn = rndPoisson(this.ini.activity / 2.0);
           for (let i = 0; i < callersToSpawn; i++) {
             this.stations.push(new DxStation(this));
           }
